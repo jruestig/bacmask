@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+
+# uv
+.venv/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App output (keep dirs, ignore artifacts)
+output/bundles/*.bacmask
+output/areas/*.csv
+!output/bundles/.gitkeep
+!output/areas/.gitkeep
