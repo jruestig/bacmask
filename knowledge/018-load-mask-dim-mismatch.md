@@ -1,16 +1,20 @@
 ---
 id: 018
-title: Load Mask Dimension Mismatch
+title: Load Mask Dimension Mismatch (superseded)
 tags: [core]
 created: 2026-04-17
-status: accepted
-related: [012]
+updated: 2026-04-19
+status: superseded
+related: [012, 015, 024, 025]
 ---
 
-# Load Mask Dimension Mismatch
+# Load Mask Dimension Mismatch (superseded)
 
-## Decision
-When a user loads a mask PNG (or `.bacmask` bundle whose mask differs from the current image) with `(H, W)` not matching the currently loaded image:
+> **Superseded by [015 — .bacmask Bundle Format](015-bacmask-bundle.md) + [025 — Overlapping Regions Allowed](025-overlapping-regions.md).**
+> Masks are no longer stored inside the `.bacmask` bundle — polygons are canonical. There is no in-bundle mask to dimension-check on load. Rasterization happens in memory from polygons, always at the current image's `(H, W)`, so a mismatch can't occur. Mask export ([024](024-mask-export-deferred.md)) is a one-way downstream operation; it produces masks, it doesn't load them. This note is kept for the reasoning trail and in case external-mask-import is ever reintroduced.
+
+## Decision (historical)
+When a user loaded a mask PNG (or `.bacmask` bundle whose mask differed from the current image) with `(H, W)` not matching the currently loaded image:
 
 1. Show a modal dialog with both dimensions, e.g.:
    > "Mask size **3000 × 4000** does not match image size **2048 × 2048**. Load anyway?"

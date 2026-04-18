@@ -1,15 +1,19 @@
 ---
 id: 012
-title: 16-bit PNG Label Maps
+title: 16-bit PNG Label Maps (superseded)
 tags: [architecture, core]
 created: 2026-04-17
-status: accepted
-related: [000, 005, 011, 015, 018]
+updated: 2026-04-19
+status: superseded
+related: [000, 005, 011, 015, 018, 024, 025]
 ---
 
-# 16-bit PNG Label Maps
+# 16-bit PNG Label Maps (superseded)
 
-## Decision
+> **Superseded by [024 — Mask Export (deferred, Python-only)](024-mask-export-deferred.md)** and [025 — Overlapping Regions Allowed](025-overlapping-regions.md).
+> A single PNG label map cannot represent overlapping regions ([025](025-overlapping-regions.md)), and mask persistence has been removed from the `.bacmask` bundle ([015](015-bacmask-bundle.md)). Raster mask output is now a deferred, headless `.npy` export ([024](024-mask-export-deferred.md)). This note is retained for the rationale behind the original choice and for the decision record.
+
+## Decision (historical)
 Masks serialized as **16-bit grayscale PNG**. One file per image, named `<image_stem>_mask.png`, written to `output/masks/`.
 
 ## Rationale

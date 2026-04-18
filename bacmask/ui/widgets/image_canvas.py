@@ -178,8 +178,15 @@ class ImageCanvas(Widget):
             xy = self._widget_pos_to_image(event.pos, (img_h, img_w))
             if xy is None:
                 return
+            hit = self._region_at(xy)
+            if hit is not None:
+                self.service.select_region(hit)
+                return
+            self.service.clear_selection()
             self.service.begin_lasso(xy)
         elif isinstance(event, PointerMove):
+            if self.service.state.active_lasso is None:
+                return
             xy = self._widget_pos_to_image(event.pos, (img_h, img_w))
             if xy is None:
                 return
@@ -189,6 +196,16 @@ class ImageCanvas(Widget):
                 self.service.close_lasso()
         elif isinstance(event, Action):
             self._handle_action(event.name)
+
+    def _region_at(self, xy: tuple[int, int]) -> int | None:
+        lm = self.service.state.label_map
+        if lm is None:
+            return None
+        ix, iy = xy
+        label = int(lm[iy, ix])
+        if label == 0 or label not in self.service.state.regions:
+            return None
+        return label
 
     def _handle_action(self, name: str) -> None:
         svc = self.service

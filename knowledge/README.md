@@ -2,6 +2,8 @@
 
 Zettelkasten-style notes for ideas, decisions, and design rationale. Conversation retainment between sessions.
 
+> **Session handoff:** [`_status.md`](_status.md) — what's in flight, what's next, what just landed. Update at the end of each session. Not a zettel — a rolling snapshot.
+
 ## Conventions
 
 - **One idea per note.** If a note sprouts a second concept, split it.
@@ -41,7 +43,7 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Conversatio
 ### Technology & format choices (2026-04-17)
 - [010 — Kivy over BeeWare](010-kivy-over-beeware.md)
 - [011 — CSV for Area Output](011-csv-for-area-output.md)
-- [012 — 16-bit PNG Label Maps](012-png-label-maps.md)
+- [012 — 16-bit PNG Label Maps](012-png-label-maps.md) *(superseded by 024 + 025)*
 - [013 — Minimal Toolset (MVP scope lock)](013-minimal-toolset.md)
 
 ### Product behavior & scope (2026-04-17)
@@ -49,11 +51,16 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Conversatio
 - [015 — .bacmask Bundle Format](015-bacmask-bundle.md)
 - [016 — Input Abstraction Layer](016-input-abstraction.md)
 - [017 — Calibration Input Model](017-calibration-input.md)
-- [018 — Load Mask Dimension Mismatch](018-load-mask-dim-mismatch.md)
+- [018 — Load Mask Dimension Mismatch](018-load-mask-dim-mismatch.md) *(superseded by 015 + 025)*
 - [019 — Development Tooling](019-dev-tooling.md)
 - [020 — Platform Scope (Desktop-First MVP)](020-platform-scope.md)
-- [021 — Vertex-Edit Collision Policy (Clip)](021-vertex-edit-collision.md)
+- [021 — Edit Collision Policy (Clip)](021-vertex-edit-collision.md) *(superseded by 025)*
 - [022 — Region Split Helper (proposed, post-MVP)](022-region-split-helper.md)
+
+### Product behavior & scope (2026-04-19)
+- [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md)
+- [024 — Mask Export (deferred, Python-only)](024-mask-export-deferred.md)
+- [025 — Overlapping Regions Allowed](025-overlapping-regions.md)
 
 ## Tags
 - `architecture` — structural decisions

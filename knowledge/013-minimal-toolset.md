@@ -3,8 +3,9 @@ id: 013
 title: Minimal Toolset (MVP scope lock)
 tags: [architecture, ui]
 created: 2026-04-17
+updated: 2026-04-19
 status: accepted
-related: [000, 014]
+related: [000, 014, 023]
 ---
 
 # Minimal Toolset
@@ -12,12 +13,23 @@ related: [000, 014]
 ## Decision
 MVP ships with **one mask primitive**: the lasso / boundary-draw tool. See [014 — Lasso Tool & Boundary Editing](014-lasso-tool.md) for mechanics.
 
+The lasso operates in two *modes* of the same gesture (press-drag-release):
+
+- **Create.** Default mode. Stroke on background becomes a new region.
+- **Edit.** Toggled via a dedicated Edit button (or `e`). Stroke on/against an existing target region adds or subtracts pixels via the add/subtract rule in [023](023-edit-mode-region-boolean-edits.md).
+
+This is still one primitive, not two tools — the gesture, the input abstraction ([016](016-input-abstraction.md)), and the rasterization path are shared. Only the outcome differs based on mode + start side.
+
 Supporting global actions:
 - **Undo / redo** ([003](003-undo-redo-commands.md))
 - **Delete region**
-- **Save All** (bundle + CSV)
-- **Load**
+- **Save** — writes the `.bacmask` bundle only ([015](015-bacmask-bundle.md)). No masks, no CSV.
+- **Export** — writes the sibling areas CSV ([011](011-csv-for-area-output.md)). Separate button, user-invoked.
+- **Load** — reads a `.bacmask` bundle.
 - **Calibration input** ([017](017-calibration-input.md))
+- **Edit mode toggle** ([023](023-edit-mode-region-boolean-edits.md))
+
+Mask export for training-data use is deferred and lives outside the UI entirely ([024](024-mask-export-deferred.md)).
 
 That's it.
 

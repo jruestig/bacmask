@@ -3,8 +3,9 @@ id: 003
 title: Undo/Redo via Command Pattern
 tags: [architecture, core]
 created: 2026-04-17
+updated: 2026-04-19
 status: accepted
-related: [002, 004, 014]
+related: [002, 004, 014, 023]
 ---
 
 # Undo/Redo via Command Pattern
@@ -15,7 +16,7 @@ Not optional. Designed in from MVP day one.
 Each structural mutation is a **Command object** in `bacmask/core/commands.py`:
 
 - `LassoCloseCommand(vertices, assigned_label_id)` — adds a new region.
-- `VertexEditCommand(label_id, old_vertices, new_vertices)` — modifies an existing boundary.
+- `RegionEditCommand(label_id, old_vertices, new_vertices, old_mask_patch)` — modifies an existing region via an add/subtract stroke ([023](023-edit-mode-region-boolean-edits.md)). Replaces the earlier `VertexEditCommand`.
 - `DeleteRegionCommand(label_id, mask_patch, vertices, name)` — removes a region; stores mask patch + vertices for undo.
 
 All commands implement `apply(state)` and `undo(state)`.
@@ -38,7 +39,7 @@ UI never touches the stack directly. `mask_service.close_lasso(...)` constructs 
 
 ## Granularity
 - One lasso press→close = **one** `LassoCloseCommand`.
-- One vertex drag press→release = **one** `VertexEditCommand`.
+- One edit stroke press→release = **one** `RegionEditCommand`.
 - One delete = **one** `DeleteRegionCommand`.
 
 ## ID monotonicity under undo

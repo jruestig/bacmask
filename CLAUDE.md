@@ -45,16 +45,18 @@ knowledge base. Start here:
 - [knowledge/006 — Configuration Management](knowledge/006-configuration-management.md)
 - [knowledge/007 — Logging](knowledge/007-logging.md)
 - [knowledge/016 — Input Abstraction Layer](knowledge/016-input-abstraction.md)
+- [knowledge/023 — Edit Mode & Region Boolean Edits](knowledge/023-edit-mode-region-boolean-edits.md)
+- [knowledge/024 — Mask Export (deferred, Python-only)](knowledge/024-mask-export-deferred.md)
+- [knowledge/025 — Overlapping Regions Allowed](knowledge/025-overlapping-regions.md)
 
 ## Core Concepts (contracts)
 
 ### Masks
-- Each region gets a **unique integer label** in a single label map (dtype: `uint16`).
-- Label map has the same dimensions as the source image.
-- On disk, the mask lives inside a `.bacmask` ZIP bundle as `mask.png` (16-bit grayscale).
+- **Polygons are canonical.** Each region is fully specified by `label_id`, `name`, and an ordered `vertices` list. Everything mask-related is derived from the polygon set.
+- **Regions may overlap.** A pixel can belong to any number of regions ([knowledge/025](knowledge/025-overlapping-regions.md)). There is no single owner; there is no stored label map. Display rendering and click-select resolve overlap by highest `label_id` (newest on top).
 - IDs are **monotonic and never re-used** after deletion ([knowledge/014](knowledge/014-lasso-tool.md)).
-- These mask files are intended for **later use as training data** for segmentation models.
-  They must be clean, deterministic, and reproducible.
+- The `.bacmask` bundle stores only `image.<ext>` + `meta.json` ([knowledge/015](knowledge/015-bacmask-bundle.md)). No raster mask on disk.
+- Raster masks for segmentation training are produced by a **deferred, headless export** — a Python function that greedy-packs polygons into layered `uint16` `.npy` files. Not wired to the UI; not MVP ([knowledge/024](knowledge/024-mask-export-deferred.md)).
 
 ### Calibration
 - The user provides a **scale factor** in mm per pixel via a text input field.
@@ -69,20 +71,27 @@ area_mm2 = pixel_count * (scale_factor_mm_per_px ** 2)
 ```
 - Area is reported for **every** labeled region — no filtering, no truncation.
 
-### Save Artifacts
-Two files per image on Save All:
+### Save vs. Export (two separate actions)
 
-1. **`<image_stem>.bacmask`** — ZIP bundle with:
-   - `image.<ext>` (original bytes)
-   - `mask.png` (16-bit grayscale label map)
-   - `meta.json` (scale, region vertices, region names, next_label_id)
-2. **`<image_stem>_areas.csv`** — human-readable CSV with locked column order:
-   ```
-   filename, region_id, region_name, area_px, area_mm2, scale_factor
-   ```
-   One row per region. Overwrite on re-save.
+**Save** (`Ctrl+S` / toolbar button) writes the bundle only:
 
-Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowledge/011-csv-for-area-output.md).
+- **`<image_stem>.bacmask`** — ZIP with:
+  - `image.<ext>` (original bytes)
+  - `meta.json` (v2 schema: scale, region vertices + names, next_label_id, image_shape)
+  - No raster mask.
+
+**Export** (separate toolbar button) writes the areas CSV:
+
+- **`<image_stem>_areas.csv`** — locked column order:
+  ```
+  filename, region_id, region_name, area_px, area_mm2, scale_factor
+  ```
+  One row per region; areas computed from polygons. Overwrite on re-export.
+  `area_px` is per-region and inclusive of any overlap — a shared pixel is counted once per region that contains it.
+
+**Mask export** for training is a separate, non-UI Python operation ([knowledge/024](knowledge/024-mask-export-deferred.md)) — deferred; not MVP.
+
+Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowledge/011-csv-for-area-output.md), [knowledge/025](knowledge/025-overlapping-regions.md).
 
 ## UI/UX Requirements
 
@@ -95,11 +104,19 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
 2. **Masking Tools (exactly one primitive — see [knowledge/013](knowledge/013-minimal-toolset.md), [knowledge/014](knowledge/014-lasso-tool.md)):**
    - **Lasso:** press-drag to trace the outline of a region. On close, the interior is
      filled with the next free label ID.
-     - Auto-close when the live endpoint reaches within ε pixels of the start (default 10 px).
-     - Keyboard close: `Enter` snaps last→first.
+     - Close on pointer release — the last captured point is joined to the first.
+     - Keyboard close: `Enter` is an equivalent explicit-close trigger (e.g. for stylus loss-of-contact).
      - Cancel in-progress lasso: `Escape`.
-   - **Vertex editing:** click an existing region's boundary to reveal handles; drag to edit.
-     Double-click a segment to insert a vertex; double-click a handle to remove it.
+     - Lassos with fewer than 3 points are silently discarded on close (no region, no history entry).
+   - **Region editing (add/subtract):** toggle **Edit mode** (toolbar button or `e`).
+     Pick a target region (single click when none set; double-click to retarget).
+     Press-drag starts an edit stroke on the current target:
+     - Start **inside** the target → stroke's outside lobe is **added** to the region.
+     - Start **outside** the target → stroke's inside cut is **subtracted**.
+     First two boundary crossings define the splice; extras ignored. Multi-piece result
+     keeps the largest connected component (tie: smallest-`(y, x)` pixel). Overlap
+     with other regions is allowed — edits are strictly per-target ([knowledge/025](knowledge/025-overlapping-regions.md)).
+     Full semantics in [knowledge/023](knowledge/023-edit-mode-region-boolean-edits.md).
    - **Delete region:** select region → `Delete` key or toolbar button. Label ID is NOT re-used.
    - No brush, no eraser, no flood fill, no threshold, no smart-select.
 
@@ -111,9 +128,9 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
 4. **File Operations:**
    - **Load Image:** file picker, accepts common formats (PNG, JPG, TIFF, BMP).
      File upload only — no camera, no URL.
-   - **Load Bundle:** `.bacmask` → restore image + mask + regions + scale.
-   - **Save All:** writes both the `.bacmask` bundle and the sibling CSV in one action.
-   - **Load Mask (dimension mismatch):** prompt, **reject by default**. See [knowledge/018](knowledge/018-load-mask-dim-mismatch.md).
+   - **Load Bundle:** `.bacmask` → restore image + polygons + scale. Rasterization happens in memory from polygons; no in-bundle mask to reconcile.
+   - **Save:** writes only the `.bacmask` bundle.
+   - **Export:** writes only the areas CSV. Separate button from Save.
 
 5. **Input abstraction:**
    - All gestures go through a semantic input layer so desktop↔touch profiles can be swapped
@@ -129,14 +146,14 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
 - **DO NOT** add features beyond masking and area measurement. This tool has one job.
 - **DO** keep the UI minimal and focused. Every element serves the
   trace → label → measure → save workflow.
-- **DO** ensure saved masks are deterministic — same image + same vertices = bit-identical `mask.png` and CSV.
-- **DO** write unit tests for all core logic (rasterization, area, I/O, bundle round-trip, undo/redo).
+- **DO** ensure persistence is deterministic — same polygons + same creation order = bit-identical bundle (`meta.json` + `image.<ext>`) and exported CSV. Same contract applies to the deferred mask export ([knowledge/024](knowledge/024-mask-export-deferred.md)) when implemented.
+- **DO** write unit tests for all core logic (rasterization, area, bundle I/O, CSV export, undo/redo).
 - **DO** handle edge cases gracefully:
   - Self-intersecting lasso polygon → rasterize per `cv2.fillPoly` even-odd rule; document in tests.
   - Lasso with zero enclosed area → warn, don't create a zero-area region.
   - Missing calibration → warn user, still allow saving; CSV `area_mm2` + `scale_factor` are empty strings.
   - Very large images → downsample for display, but compute areas on full resolution.
-  - Mask dimensions don't match image on load → prompt (reject by default).
+  - Overlapping regions are allowed — treat per-region masks independently ([knowledge/025](knowledge/025-overlapping-regions.md)).
 
 ## Cross-Platform Notes
 
@@ -169,15 +186,16 @@ No other dependencies. Keep it lean.
 
 - [ ] User can load an image from disk via file picker (shown in original color).
 - [ ] User can input a scale factor (mm per pixel); empty = uncalibrated.
-- [ ] User can trace a closed boundary around a colony with the lasso tool (auto-close + `Enter`).
-- [ ] User can edit an existing region's boundary via vertex handles.
+- [ ] User can trace a closed boundary around a colony with the lasso tool (release to close; `Enter` as equivalent explicit trigger).
+- [ ] User can edit an existing region's boundary via add/subtract strokes in Edit mode. Overlap with other regions is allowed.
 - [ ] User can delete a region; its label ID is not re-used.
 - [ ] All region areas (px and mm²) are displayed in a results panel, updating live.
 - [ ] Masks persist on the canvas — they never auto-disappear.
-- [ ] "Save All" writes `<image_stem>.bacmask` + `<image_stem>_areas.csv`.
-- [ ] Bundle can be reloaded for a given image and restores regions + scale + IDs exactly.
+- [ ] **Save** writes `<image_stem>.bacmask` (bundle only, no mask, no CSV).
+- [ ] **Export** writes `<image_stem>_areas.csv` (CSV only).
+- [ ] Bundle can be reloaded for a given image and restores regions + scale + IDs exactly (polygons canonical).
 - [ ] CSV is directly human-readable with the locked column schema.
-- [ ] Undo / redo works for lasso close, vertex edit, and delete, with a bounded history.
+- [ ] Undo / redo works for lasso close, region edit, and delete, with a bounded history.
 - [ ] App runs on Linux and Windows.
 - [ ] Unit tests pass for core logic (rasterization, area, bundle I/O, CSV, undo/redo, calibration).
 - [ ] `ruff check` and `ruff format --check` pass.
