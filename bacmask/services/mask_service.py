@@ -9,13 +9,14 @@ See knowledge/001 (separation), 002 (state), 003 (commands), 014 (lasso).
 
 from __future__ import annotations
 
+import logging
 import zipfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import numpy as np
 
-from bacmask.core import area, calibration, io_manager
+from bacmask.core import area, calibration, io_manager, masking
 from bacmask.core.commands import (
     DeleteRegionCommand,
     LassoCloseCommand,
@@ -23,6 +24,8 @@ from bacmask.core.commands import (
 )
 from bacmask.core.history import UndoRedoStack
 from bacmask.core.state import SessionState
+
+log = logging.getLogger(__name__)
 
 
 class MaskService:
@@ -101,6 +104,16 @@ class MaskService:
             self._notify()
             return None
         verts = np.asarray(self._active_lasso, dtype=np.int32)
+        enclosed_area = masking.polygon_area(verts)
+        if enclosed_area <= 0.0:
+            log.warning(
+                "lasso discarded: polygon with %d vertices encloses zero area",
+                len(verts),
+            )
+            self._active_lasso = []
+            self.state.active_lasso = None
+            self._notify()
+            return None
         cmd = LassoCloseCommand(verts)
         self.history.push(cmd, self.state)
         self._active_lasso = []
@@ -159,6 +172,25 @@ class MaskService:
             self._notify()
         return ok
 
+    # ---- edit mode ----------------------------------------------------------
+
+    def toggle_edit_mode(self) -> bool:
+        """Flip the edit-mode flag. Returns the new value."""
+        self.state.edit_mode = not self.state.edit_mode
+        # Any in-progress lasso is ambiguous across a mode flip.
+        self._active_lasso = []
+        self.state.active_lasso = None
+        self._notify()
+        return self.state.edit_mode
+
+    def set_edit_mode(self, enabled: bool) -> None:
+        if self.state.edit_mode == enabled:
+            return
+        self.state.edit_mode = enabled
+        self._active_lasso = []
+        self.state.active_lasso = None
+        self._notify()
+
     # ---- calibration --------------------------------------------------------
 
     def set_calibration(self, scale_mm_per_px: float | None) -> None:
@@ -190,9 +222,10 @@ class MaskService:
             )
         return rows
 
-    # ---- save ---------------------------------------------------------------
+    # ---- save / export ------------------------------------------------------
 
-    def save_all(self, bundle_path: Path | str, csv_path: Path | str) -> None:
+    def save_bundle(self, bundle_path: Path | str) -> None:
+        """Write the ``.bacmask`` bundle only. No CSV; no mask sidecar."""
         if (
             self.state.label_map is None
             or self.state.image_bytes is None
@@ -212,6 +245,11 @@ class MaskService:
             label_map=self.state.label_map,
             meta=meta,
         )
-        io_manager.save_areas_csv(csv_path, self.compute_area_rows())
         self.state.dirty = False
         self._notify()
+
+    def export_csv(self, csv_path: Path | str) -> None:
+        """Write the sibling areas CSV. Independent of saving the bundle."""
+        if self.state.label_map is None:
+            raise ValueError("no image loaded")
+        io_manager.save_areas_csv(csv_path, self.compute_area_rows())

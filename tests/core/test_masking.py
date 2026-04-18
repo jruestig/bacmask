@@ -47,3 +47,24 @@ def test_erase_region_clears_only_matching_label():
     masking.erase_region(m, label_id=4)
     assert (m == 4).sum() == 0
     assert (m == 5).sum() == 9
+
+
+def test_polygon_area_unit_square_is_one():
+    # A 1x1 axis-aligned square has enclosed area = 1 (shoelace formula).
+    verts = np.array([[5, 5], [6, 5], [6, 6], [5, 6]], dtype=np.int32)
+    assert masking.polygon_area(verts) == 1.0
+
+
+def test_polygon_area_zero_for_collinear():
+    verts = np.array([[5, 5], [10, 5], [15, 5]], dtype=np.int32)
+    assert masking.polygon_area(verts) == 0.0
+
+
+def test_polygon_area_zero_for_duplicate_points():
+    verts = np.array([[5, 5], [5, 5], [5, 5]], dtype=np.int32)
+    assert masking.polygon_area(verts) == 0.0
+
+
+def test_polygon_area_zero_for_fewer_than_3_vertices():
+    verts = np.array([[5, 5], [10, 10]], dtype=np.int32)
+    assert masking.polygon_area(verts) == 0.0

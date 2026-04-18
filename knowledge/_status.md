@@ -3,11 +3,10 @@
 Session-handoff doc. Updated at the end of each working session. What follows `knowledge/` conventions — kept short on purpose.
 
 ## Currently working on
-- Landing the overlap-aware data model. Spec is finalized across knowledge notes (002, 015, 023, 024, 025); code still reflects the old disjoint + in-bundle-mask model.
+- Nothing in flight at end of session. Next session picks up the core data-model refactor — see "Next actions."
 
 ## In progress (started, not done)
-- **Canvas interactions.** Tap-on-mask selects; tap-on-bg begins lasso (shipped this session). Zoom/pan still ignore the semantic events the input adapter emits.
-- **Python 3.12 pin.** `.python-version` added and venv resynced; `uv run pytest` green. No further action needed unless the venv drifts again.
+- Landing the overlap-aware data model. Spec is finalized across knowledge notes (002, 015, 023, 024, 025); code still reflects the old disjoint + in-bundle-mask model. The big refactor (bundle v2 + polygons-canonical state + RegionEditCommand) is next session — it interlocks too much to parallelize safely.
 
 ## Blocked (waiting on external input or deferred decisions)
 - **Mask export output location + CLI.** User wants to pick `out_dir` and a CLI wrapper "later." Format contract is locked ([024](024-mask-export-deferred.md)); placement and ergonomics deferred.
@@ -41,6 +40,10 @@ Session-handoff doc. Updated at the end of each working session. What follows `k
    - Already discarded silently with <3 points; add a warning popup or log line for non-trivial zero-area strokes.
 
 ## Recently completed (last ~2 sessions)
+- **Save/Export UI split.** `Save` writes only the bundle; new `Export CSV` button writes only the areas CSV. Service exposes `save_bundle` + `export_csv` (replacing `save_all`). `Ctrl+E` binds export, `Ctrl+S` still saves. Bundle internals unchanged (still v1 with `mask.png`); format refactor is next session.
+- **Edit mode toggle scaffolding.** `edit_mode: bool` on `SessionState` (session-local, not persisted). `ToggleButton` in toolbar reflects + drives the flag via `MaskService.set_edit_mode` / `toggle_edit_mode`. Bare `e` hotkey bound to `toggle_edit_mode` action in `app.py`. In-progress lasso is canceled on any mode flip so users can't commit a cross-mode stroke. No add/subtract behavior wired yet.
+- **Zero-area lasso guard.** `masking.polygon_area` (wraps `cv2.contourArea`) exposes the mathematical enclosed area. `mask_service.close_lasso` discards polygons with `area <= 0` and logs a WARNING. Catches collinear / duplicate-point / sub-3-vertex cases deterministically — `cv2.fillPoly` fills boundary pixels for degenerate polygons, so the rasterization count is misleading; shoelace area is the right primitive.
+- **Zoom/pan in `ImageCanvas`** (completed by background agent). View-local `_view_scale` + `_view_offset`, reset on new image load. Wheel zoom cursor-centered, clamped `[0.1, 20.0]`. Middle-mouse drag emits `Pan` via `DesktopInputAdapter`; canvas applies with clamp so at least 10% of the fit-displayed image stays on-screen. `image_utils` gained `display_to_image_view` / `image_to_display_view`. 15 new tests (coord round-trip, adapter pan emission, cursor-centered zoom invariant). Lasso / click-select remain accurate under non-identity view.
 - First implementation of BacMask (commit `93992ab`): core + services + UI skeleton, 105 tests passing, ruff clean.
 - **Python 3.12 pin.** `.python-version` added; `uv sync --extra dev` fixed stale `my-imagej` shebang in `.venv/bin/pytest`. `uv run pytest` picks the project venv.
 - **Canvas click-select.** `ImageCanvas._on_input` routes PointerDown through `_region_at`: labeled pixel → `select_region`; background → `clear_selection` + `begin_lasso`. PointerMove ignored when no lasso is active.

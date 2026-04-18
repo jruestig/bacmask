@@ -20,15 +20,23 @@ from bacmask.ui.input.desktop_adapter import DesktopInputAdapter
 from bacmask.ui.input.events import (
     Action,
     InputEvent,
+    Pan,
     PointerDown,
     PointerMove,
     PointerUp,
+    Zoom,
 )
 from bacmask.utils import image_utils
 
 OVERLAY_ALPHA = 0.45
 SELECTED_OUTLINE_COLOR = (0.0, 1.0, 1.0, 1.0)  # cyan
 LASSO_PREVIEW_COLOR = (1.0, 1.0, 0.0, 1.0)  # yellow
+
+ZOOM_STEP = 1.2
+VIEW_SCALE_MIN = 0.1
+VIEW_SCALE_MAX = 20.0
+# Fraction of the fit-displayed image that must remain visible in either axis.
+PAN_KEEP_VISIBLE_FRAC = 0.1
 
 
 class ImageCanvas(Widget):
@@ -40,6 +48,11 @@ class ImageCanvas(Widget):
         self._last_image: np.ndarray | None = None
         self._input = DesktopInputAdapter(emit=self._on_input)
 
+        # UI-local view transform (not persisted, not in SessionState).
+        # view_offset is in display-space (top-down Y) pixels.
+        self._view_scale: float = 1.0
+        self._view_offset: tuple[float, float] = (0.0, 0.0)
+
         service.subscribe(self._on_state_changed)
         self.bind(size=lambda *a: self._repaint(), pos=lambda *a: self._repaint())
 
@@ -47,10 +60,13 @@ class ImageCanvas(Widget):
 
     def _on_state_changed(self) -> None:
         # Image texture rebuilds only when the image object actually changes
-        # (rare — on load_image / load_bundle).
+        # (rare — on load_image / load_bundle). Also reset view transform
+        # because the old pan/zoom is meaningless for a new image.
         if self.service.state.image is not self._last_image:
             self._rebuild_image_texture()
             self._last_image = self.service.state.image
+            self._view_scale = 1.0
+            self._view_offset = (0.0, 0.0)
         # Overlay texture rebuilds whenever label_map could have changed
         # (everything except in-progress lasso drag).
         if self.service.state.active_lasso is None:
@@ -101,20 +117,29 @@ class ImageCanvas(Widget):
             image_size=(img_w, img_h),
             widget_size=(self.width, self.height),
         )
+        vs = self._view_scale
+        vox, voy = self._view_offset
+        # View-transformed rectangle in display (top-down) space.
+        tx = off_x + vox
+        ty_top = off_y + voy
+        tw = disp_w * vs
+        th = disp_h * vs
+        # Convert top-down Y to Kivy Y-up for Rectangle pos.
+        kivy_pos_y = self.y + (self.height - ty_top - th)
 
         with self.canvas:
             Color(1, 1, 1, 1)
             Rectangle(
                 texture=self._image_texture,
-                pos=(self.x + off_x, self.y + off_y),
-                size=(disp_w, disp_h),
+                pos=(self.x + tx, kivy_pos_y),
+                size=(tw, th),
             )
             if self._overlay_texture is not None:
                 Color(1, 1, 1, 1)
                 Rectangle(
                     texture=self._overlay_texture,
-                    pos=(self.x + off_x, self.y + off_y),
-                    size=(disp_w, disp_h),
+                    pos=(self.x + tx, kivy_pos_y),
+                    size=(tw, th),
                 )
 
             # Selected region outline (from stored polygon vertices)
@@ -144,14 +169,17 @@ class ImageCanvas(Widget):
         """Map a list of image-space (x, y) points to a flat widget-space [x, y, ...] list.
 
         Flips Y because image origin is top-left, widget (Kivy) origin is bottom-left.
+        Includes the UI-local view transform (zoom/pan).
         """
         img_w, img_h = image_size
         out: list[float] = []
         for px, py in pts:
-            wx, wy = image_utils.image_to_display(
+            wx, wy = image_utils.image_to_display_view(
                 (float(px), float(py)),
                 (img_w, img_h),
                 (self.width, self.height),
+                self._view_scale,
+                self._view_offset,
             )
             out.extend([self.x + wx, self.y + self.height - wy])
         return out
@@ -194,8 +222,96 @@ class ImageCanvas(Widget):
         elif isinstance(event, PointerUp):
             if self.service.state.active_lasso is not None:
                 self.service.close_lasso()
+        elif isinstance(event, Zoom):
+            self._apply_zoom(event.center, event.delta, (img_w, img_h))
+        elif isinstance(event, Pan):
+            self._apply_pan(event.delta, (img_w, img_h))
         elif isinstance(event, Action):
             self._handle_action(event.name)
+
+    # ---- view transform -----------------------------------------------------
+
+    def _apply_zoom(
+        self,
+        center: tuple[float, float],
+        delta: float,
+        image_size: tuple[int, int],
+    ) -> None:
+        """Zoom at ``center`` (window-space, Y-up) so the image pixel under it stays put."""
+        img_w, img_h = image_size
+        # Convert cursor to display-space (top-down, widget-local).
+        cx, cy = center
+        lx = cx - self.x
+        ly_top = self.height - (cy - self.y)
+
+        factor = ZOOM_STEP if delta > 0 else 1.0 / ZOOM_STEP
+        new_scale = max(VIEW_SCALE_MIN, min(VIEW_SCALE_MAX, self._view_scale * factor))
+        if new_scale == self._view_scale:
+            return
+
+        # Pixel under cursor before zoom.
+        ix, iy = image_utils.display_to_image_view(
+            (lx, ly_top),
+            (img_w, img_h),
+            (self.width, self.height),
+            self._view_scale,
+            self._view_offset,
+        )
+        # Solve for new offset so the same image pixel maps to the same display point.
+        # display = image * s * new_scale + off_fit + new_offset
+        s, off_x, off_y, _, _ = image_utils.fit_to_widget((img_w, img_h), (self.width, self.height))
+        new_vox = lx - ix * s * new_scale - off_x
+        new_voy = ly_top - iy * s * new_scale - off_y
+        self._view_scale = new_scale
+        self._view_offset = self._clamp_offset((new_vox, new_voy), image_size)
+        self._repaint()
+
+    def _apply_pan(
+        self,
+        delta: tuple[float, float],
+        image_size: tuple[int, int],
+    ) -> None:
+        """Apply a pan delta given in widget-space Y-up pixels."""
+        dx, dy = delta
+        # Widget Y-up delta → display top-down delta flips y.
+        vox, voy = self._view_offset
+        self._view_offset = self._clamp_offset((vox + dx, voy - dy), image_size)
+        self._repaint()
+
+    def _clamp_offset(
+        self,
+        offset: tuple[float, float],
+        image_size: tuple[int, int],
+    ) -> tuple[float, float]:
+        """Clamp the offset so the image can never be more than (1 - keep_frac) off-screen."""
+        img_w, img_h = image_size
+        s, _off_x, _off_y, disp_w, disp_h = image_utils.fit_to_widget(
+            (img_w, img_h), (self.width, self.height)
+        )
+        if disp_w <= 0 or disp_h <= 0:
+            return offset
+        vs = self._view_scale
+        tw = disp_w * vs
+        th = disp_h * vs
+        keep_w = max(1.0, tw * PAN_KEEP_VISIBLE_FRAC)
+        keep_h = max(1.0, th * PAN_KEEP_VISIBLE_FRAC)
+        # In display (top-down) space, the image rectangle spans
+        # [off_fit + vox, off_fit + vox + tw] in x, similarly in y.
+        # We need at least `keep_w` of it to overlap [0, widget_w].
+        off_x_fit = _off_x
+        off_y_fit = _off_y
+        vox_min = keep_w - off_x_fit - tw
+        vox_max = self.width - off_x_fit - keep_w
+        voy_min = keep_h - off_y_fit - th
+        voy_max = self.height - off_y_fit - keep_h
+        vox, voy = offset
+        # When the allowed range is invalid (negative because the widget is smaller
+        # than keep_w), center on 0 to avoid snapping surprises.
+        if vox_min <= vox_max:
+            vox = min(vox_max, max(vox_min, vox))
+        if voy_min <= voy_max:
+            voy = min(voy_max, max(voy_min, voy))
+        return vox, voy
 
     def _region_at(self, xy: tuple[int, int]) -> int | None:
         lm = self.service.state.label_map
@@ -234,8 +350,12 @@ class ImageCanvas(Widget):
         wx, wy = window_pos
         lx = wx - self.x
         ly_from_top = self.height - (wy - self.y)
-        ix, iy = image_utils.display_to_image(
-            (lx, ly_from_top), (img_w, img_h), (self.width, self.height)
+        ix, iy = image_utils.display_to_image_view(
+            (lx, ly_from_top),
+            (img_w, img_h),
+            (self.width, self.height),
+            self._view_scale,
+            self._view_offset,
         )
         if 0 <= ix < img_w and 0 <= iy < img_h:
             return int(ix), int(iy)

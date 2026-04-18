@@ -22,6 +22,7 @@ class SessionState:
     scale_mm_per_px: float | None = None
     active_lasso: np.ndarray | None = None
     selected_region_id: int | None = None
+    edit_mode: bool = False
     dirty: bool = False
 
     def set_image(self, image: np.ndarray, path: Path) -> None:

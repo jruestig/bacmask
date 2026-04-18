@@ -31,3 +31,19 @@ def erase_region(label_map: np.ndarray, label_id: int) -> np.ndarray:
     """Zero all pixels equal to ``label_id`` (in place)."""
     label_map[label_map == label_id] = 0
     return label_map
+
+
+def polygon_area(vertices: np.ndarray) -> float:
+    """Return the polygon's enclosed area in square pixels (shoelace / cv2).
+
+    Uses ``cv2.contourArea`` — the mathematical enclosed area via the shoelace
+    formula. Returns ``0.0`` for degenerate inputs (fewer than 3 vertices,
+    collinear points, duplicate points). This is independent of rasterization
+    quirks: ``cv2.fillPoly`` of a collinear polygon still fills boundary pixels
+    along the line, but the enclosed area is zero and the lasso should be
+    discarded. See knowledge/014 edge-case handling.
+    """
+    verts = np.asarray(vertices, dtype=np.int32).reshape(-1, 2)
+    if len(verts) < 3:
+        return 0.0
+    return float(cv2.contourArea(verts))

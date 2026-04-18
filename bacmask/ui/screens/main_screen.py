@@ -20,13 +20,14 @@ class MainScreen(BoxLayout):
         service: MaskService,
         on_load: Callable[[], None],
         on_save: Callable[[], None],
+        on_export: Callable[[], None],
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("orientation", "vertical")
         super().__init__(**kwargs)
         self.service = service
 
-        self.add_widget(Toolbar(service, on_load=on_load, on_save=on_save))
+        self.add_widget(Toolbar(service, on_load=on_load, on_save=on_save, on_export=on_export))
         self.add_widget(CalibrationInput(service))
 
         body = BoxLayout(orientation="horizontal")

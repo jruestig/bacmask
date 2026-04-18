@@ -1,12 +1,19 @@
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 
-from bacmask.ui.input.desktop_adapter import DEFAULT_KEYBINDINGS, keybinding_for
+from bacmask.ui.input.desktop_adapter import (
+    DEFAULT_KEYBINDINGS,
+    DesktopInputAdapter,
+    keybinding_for,
+)
 from bacmask.ui.input.events import (
     Action,
+    Pan,
     PointerDown,
     PointerMove,
+    PointerUp,
     Zoom,
 )
 
@@ -58,8 +65,12 @@ def test_keybinding_ctrl_shift_z_redo():
     assert keybinding_for("z", {"ctrl", "shift"}) == "redo"
 
 
-def test_keybinding_ctrl_s_save():
-    assert keybinding_for("s", {"ctrl"}) == "save_all"
+def test_keybinding_ctrl_s_save_bundle():
+    assert keybinding_for("s", {"ctrl"}) == "save_bundle"
+
+
+def test_keybinding_ctrl_e_export_csv():
+    assert keybinding_for("e", {"ctrl"}) == "export_csv"
 
 
 def test_keybinding_unknown_returns_none():
@@ -76,3 +87,64 @@ def test_default_keybindings_dict_shape():
         assert isinstance(key, str)
         assert isinstance(mods, frozenset)
         assert isinstance(action, str)
+
+
+# ---- DesktopInputAdapter emissions ----
+
+
+def _touch(x: float, y: float, button: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(x=x, y=y, pos=(x, y), button=button)
+
+
+def test_adapter_left_drag_emits_pointer_sequence():
+    events = []
+    adapter = DesktopInputAdapter(emit=events.append)
+    assert adapter.on_touch_down(_touch(5, 5, button="left")) is True
+    assert adapter.on_touch_move(_touch(10, 12, button="left")) is True
+    assert adapter.on_touch_up(_touch(10, 12, button="left")) is True
+    kinds = [type(e) for e in events]
+    assert kinds == [PointerDown, PointerMove, PointerUp]
+    assert events[0].pos == (5, 5)
+    assert events[1].pos == (10, 12)
+    assert events[2].pos == (10, 12)
+
+
+def test_adapter_scroll_emits_zoom_up_and_down():
+    events = []
+    adapter = DesktopInputAdapter(emit=events.append)
+    adapter.on_touch_down(_touch(40, 60, button="scrollup"))
+    adapter.on_touch_down(_touch(40, 60, button="scrolldown"))
+    zooms = [e for e in events if isinstance(e, Zoom)]
+    assert len(zooms) == 2
+    assert zooms[0].center == (40, 60)
+    assert zooms[0].delta > 0
+    assert zooms[1].delta < 0
+
+
+def test_adapter_middle_drag_emits_pan():
+    events = []
+    adapter = DesktopInputAdapter(emit=events.append)
+    adapter.on_touch_down(_touch(100, 100, button="middle"))
+    adapter.on_touch_move(_touch(115, 90, button="middle"))
+    adapter.on_touch_move(_touch(115, 80, button="middle"))
+    adapter.on_touch_up(_touch(115, 80, button="middle"))
+    pans = [e for e in events if isinstance(e, Pan)]
+    assert len(pans) == 2
+    assert pans[0].delta == pytest.approx((15, -10))
+    assert pans[1].delta == pytest.approx((0, -10))
+    # Middle-drag must not emit PointerDown/Move/Up.
+    assert not any(isinstance(e, (PointerDown, PointerMove, PointerUp)) for e in events)
+
+
+def test_adapter_middle_drag_does_not_interfere_with_later_left_drag():
+    events = []
+    adapter = DesktopInputAdapter(emit=events.append)
+    adapter.on_touch_down(_touch(0, 0, button="middle"))
+    adapter.on_touch_move(_touch(5, 5, button="middle"))
+    adapter.on_touch_up(_touch(5, 5, button="middle"))
+    events.clear()
+    adapter.on_touch_down(_touch(10, 10, button="left"))
+    adapter.on_touch_move(_touch(12, 12, button="left"))
+    adapter.on_touch_up(_touch(12, 12, button="left"))
+    kinds = [type(e) for e in events]
+    assert kinds == [PointerDown, PointerMove, PointerUp]

@@ -27,7 +27,8 @@ class BacMaskApp(App):
         self.screen = MainScreen(
             self.service,
             on_load=self._open_load_dialog,
-            on_save=self._save_all,
+            on_save=self._save_bundle,
+            on_export=self._export_csv,
         )
         Window.bind(on_key_down=self._on_key_down)
         return self.screen
@@ -70,8 +71,12 @@ class BacMaskApp(App):
                     svc.delete_region(sid)
                 except KeyError:
                     pass
-        elif action == "save_all":
-            self._save_all()
+        elif action == "save_bundle":
+            self._save_bundle()
+        elif action == "export_csv":
+            self._export_csv()
+        elif action == "toggle_edit_mode":
+            svc.toggle_edit_mode()
         elif action == "load_image":
             self._open_load_dialog()
         else:
@@ -128,7 +133,7 @@ class BacMaskApp(App):
         cancel.bind(on_release=lambda *_: popup.dismiss())
         popup.open()
 
-    def _save_all(self) -> None:
+    def _save_bundle(self) -> None:
         state = self.service.state
         if state.image_filename is None:
             _popup("No image loaded.", title="Save")
@@ -136,15 +141,29 @@ class BacMaskApp(App):
 
         stem = Path(state.image_filename).stem
         defaults.BUNDLES_DIR.mkdir(parents=True, exist_ok=True)
-        defaults.AREAS_DIR.mkdir(parents=True, exist_ok=True)
         bundle_path = defaults.BUNDLES_DIR / f"{stem}.bacmask"
+
+        try:
+            self.service.save_bundle(bundle_path)
+            _popup(f"Saved:\n{bundle_path}", title="Saved")
+        except Exception as e:
+            _popup(f"Save failed: {e}", title="Error")
+
+    def _export_csv(self) -> None:
+        state = self.service.state
+        if state.image_filename is None:
+            _popup("No image loaded.", title="Export")
+            return
+
+        stem = Path(state.image_filename).stem
+        defaults.AREAS_DIR.mkdir(parents=True, exist_ok=True)
         csv_path = defaults.AREAS_DIR / f"{stem}_areas.csv"
 
         try:
-            self.service.save_all(bundle_path, csv_path)
-            _popup(f"Saved:\n{bundle_path}\n{csv_path}", title="Saved")
+            self.service.export_csv(csv_path)
+            _popup(f"Exported:\n{csv_path}", title="Exported")
         except Exception as e:
-            _popup(f"Save failed: {e}", title="Error")
+            _popup(f"Export failed: {e}", title="Error")
 
 
 # ---- helpers ---------------------------------------------------------------

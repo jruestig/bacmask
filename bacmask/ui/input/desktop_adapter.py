@@ -7,6 +7,7 @@ from collections.abc import Callable
 from .events import (
     Action,
     InputEvent,
+    Pan,
     PointerDown,
     PointerMove,
     PointerUp,
@@ -24,7 +25,9 @@ DEFAULT_KEYBINDINGS: dict[tuple[str, frozenset[str]], str] = {
     ("z", frozenset({"ctrl"})): "undo",
     ("z", frozenset({"ctrl", "shift"})): "redo",
     ("y", frozenset({"ctrl"})): "redo",
-    ("s", frozenset({"ctrl"})): "save_all",
+    ("s", frozenset({"ctrl"})): "save_bundle",
+    ("e", frozenset({"ctrl"})): "export_csv",
+    ("e", frozenset()): "toggle_edit_mode",
     ("o", frozenset({"ctrl"})): "load_image",
 }
 
@@ -38,13 +41,15 @@ class DesktopInputAdapter:
     """Translate Kivy touch + keyboard events into :mod:`bacmask.ui.input.events`.
 
     The ``emit`` callback receives one :class:`InputEvent` per semantic event.
-    Mouse scroll becomes :class:`Zoom`; keyboard combos resolve via
-    :data:`DEFAULT_KEYBINDINGS`.
+    Mouse scroll becomes :class:`Zoom`; middle-mouse drag becomes :class:`Pan`;
+    keyboard combos resolve via :data:`DEFAULT_KEYBINDINGS`.
     """
 
     def __init__(self, emit: Callable[[InputEvent], None]) -> None:
         self._emit = emit
-        self._dragging = False
+        # One of: None, "pointer", "pan".
+        self._drag_mode: str | None = None
+        self._last_pan_pos: tuple[float, float] | None = None
 
     # ---- Kivy touch events ---------------------------------------------------
 
@@ -54,22 +59,37 @@ class DesktopInputAdapter:
             delta = 1.0 if button == "scrollup" else -1.0
             self._emit(Zoom(center=(touch.x, touch.y), delta=delta))
             return True
-        self._dragging = True
+        if button == "middle":
+            self._drag_mode = "pan"
+            self._last_pan_pos = (touch.x, touch.y)
+            return True
+        self._drag_mode = "pointer"
         self._emit(PointerDown(pos=(touch.x, touch.y)))
         return True
 
     def on_touch_move(self, touch) -> bool:
-        if not self._dragging:
-            return False
-        self._emit(PointerMove(pos=(touch.x, touch.y)))
-        return True
+        if self._drag_mode == "pointer":
+            self._emit(PointerMove(pos=(touch.x, touch.y)))
+            return True
+        if self._drag_mode == "pan":
+            last = self._last_pan_pos or (touch.x, touch.y)
+            dx = touch.x - last[0]
+            dy = touch.y - last[1]
+            self._last_pan_pos = (touch.x, touch.y)
+            self._emit(Pan(delta=(dx, dy)))
+            return True
+        return False
 
     def on_touch_up(self, touch) -> bool:
-        if not self._dragging:
-            return False
-        self._dragging = False
-        self._emit(PointerUp(pos=(touch.x, touch.y)))
-        return True
+        if self._drag_mode == "pointer":
+            self._drag_mode = None
+            self._emit(PointerUp(pos=(touch.x, touch.y)))
+            return True
+        if self._drag_mode == "pan":
+            self._drag_mode = None
+            self._last_pan_pos = None
+            return True
+        return False
 
     # ---- Kivy keyboard events ------------------------------------------------
 

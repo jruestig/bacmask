@@ -181,7 +181,7 @@ def test_area_rows_calibrated(tmp_path):
 # ---- save / load round-trip ----
 
 
-def test_save_all_writes_bundle_and_csv(tmp_path):
+def test_save_bundle_and_export_csv(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square())
@@ -189,7 +189,8 @@ def test_save_all_writes_bundle_and_csv(tmp_path):
 
     bundle_p = tmp_path / "out.bacmask"
     csv_p = tmp_path / "out.csv"
-    svc.save_all(bundle_p, csv_p)
+    svc.save_bundle(bundle_p)
+    svc.export_csv(csv_p)
 
     assert bundle_p.exists()
     assert csv_p.exists()
@@ -200,6 +201,31 @@ def test_save_all_writes_bundle_and_csv(tmp_path):
     assert loaded.meta.scale_mm_per_px == 0.01
 
 
+def test_save_bundle_does_not_write_csv(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square())
+
+    bundle_p = tmp_path / "s.bacmask"
+    svc.save_bundle(bundle_p)
+
+    assert bundle_p.exists()
+    # No CSV is written anywhere in tmp_path by save_bundle.
+    assert list(tmp_path.glob("*.csv")) == []
+
+
+def test_export_csv_does_not_clear_dirty(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square())
+    # After the lasso, the state has pending mutations.
+    assert svc.state.dirty is True
+
+    svc.export_csv(tmp_path / "a.csv")
+    # Export is not a save — dirty flag is untouched by it.
+    assert svc.state.dirty is True
+
+
 def test_load_bundle_restores_state(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
@@ -207,8 +233,7 @@ def test_load_bundle_restores_state(tmp_path):
     svc.set_calibration(0.02)
 
     bundle_p = tmp_path / "round.bacmask"
-    csv_p = tmp_path / "round.csv"
-    svc.save_all(bundle_p, csv_p)
+    svc.save_bundle(bundle_p)
 
     svc2 = MaskService()
     svc2.load_bundle(bundle_p)
@@ -231,8 +256,7 @@ def test_id_stability_survives_save_load(tmp_path):
     assert svc.state.next_label_id == 3  # not decremented
 
     bundle_p = tmp_path / "s.bacmask"
-    csv_p = tmp_path / "s.csv"
-    svc.save_all(bundle_p, csv_p)
+    svc.save_bundle(bundle_p)
 
     svc2 = MaskService()
     svc2.load_bundle(bundle_p)
@@ -241,13 +265,19 @@ def test_id_stability_survives_save_load(tmp_path):
     assert lid == 3  # new region gets 3, not reusing 1
 
 
-# ---- save guard ----
+# ---- save / export guards ----
 
 
-def test_save_all_without_image_raises(tmp_path):
+def test_save_bundle_without_image_raises(tmp_path):
     svc = MaskService()
     with pytest.raises(ValueError):
-        svc.save_all(tmp_path / "x.bacmask", tmp_path / "x.csv")
+        svc.save_bundle(tmp_path / "x.bacmask")
+
+
+def test_export_csv_without_image_raises(tmp_path):
+    svc = MaskService()
+    with pytest.raises(ValueError):
+        svc.export_csv(tmp_path / "x.csv")
 
 
 # ---- selection ----
@@ -354,3 +384,58 @@ def test_subscribe_fires_on_state_change(tmp_path):
     svc.subscribe(lambda: calls.append("x"))
     svc.load_image(_write_image(tmp_path))
     assert len(calls) >= 1
+
+
+# ---- edit mode ----
+
+
+def test_toggle_edit_mode_flips_flag_and_notifies():
+    svc = MaskService()
+    assert svc.state.edit_mode is False
+    calls: list[bool] = []
+    svc.subscribe(lambda: calls.append(svc.state.edit_mode))
+
+    assert svc.toggle_edit_mode() is True
+    assert svc.state.edit_mode is True
+    assert svc.toggle_edit_mode() is False
+    assert svc.state.edit_mode is False
+    assert calls == [True, False]
+
+
+def test_set_edit_mode_is_idempotent():
+    svc = MaskService()
+    calls: list[int] = []
+    svc.subscribe(lambda: calls.append(1))
+
+    svc.set_edit_mode(False)  # already False
+    svc.set_edit_mode(True)
+    svc.set_edit_mode(True)  # no-op
+    svc.set_edit_mode(False)
+    # Only the two real transitions should have fired.
+    assert sum(calls) == 2
+
+
+def test_toggle_edit_mode_cancels_active_lasso(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.begin_lasso((5, 5))
+    svc.add_lasso_point((10, 10))
+    assert svc.state.active_lasso is not None
+
+    svc.toggle_edit_mode()
+    assert svc.state.active_lasso is None
+
+
+# ---- zero-area guard ----
+
+
+def test_close_lasso_discards_zero_area_polygon(tmp_path, caplog):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    # Three collinear points — polygon encloses no area.
+    collinear = [(5, 5), (10, 5), (15, 5)]
+    with caplog.at_level("WARNING", logger="bacmask.services.mask_service"):
+        assert _draw_lasso(svc, collinear) is None
+    assert svc.state.regions == {}
+    assert svc.state.next_label_id == 1
+    assert any("zero area" in rec.message for rec in caplog.records)
