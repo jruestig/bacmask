@@ -118,20 +118,12 @@ class MaskService:
         self.state.image_ext = bundle.image_ext
         h, w = bundle.image.shape[:2]
         self.state.regions = {int(k): v for k, v in bundle.meta.regions.items()}
-        # Polygons are canonical — rasterize each into a per-region bool mask
-        # and paint the display cache from them. The mask inside the bundle (if
-        # any, for v1 bundles) is ignored. See knowledge/015, 025.
-        self.state.region_masks = {
-            label_id: masking.rasterize_polygon_mask(meta["vertices"], (h, w))
-            for label_id, meta in self.state.regions.items()
-        }
-        # One-time area sum per region at bundle load; cached thereafter so the
-        # results panel doesn't re-sum HxW masks on every refresh.
-        self.state.region_areas = {
-            label_id: int(mask.sum()) for label_id, mask in self.state.region_masks.items()
-        }
+        # Polygons are canonical (knowledge/030). Paint the display cache
+        # directly from the polygon set in ascending id order so the highest
+        # id wins on overlap (knowledge/025). Per-region masks are derived on
+        # demand by anything that needs them.
         self.state.label_map = np.zeros((h, w), dtype=np.uint16)
-        masking.repaint_label_map(self.state.label_map, self.state.region_masks)
+        masking.paint_label_map_bbox(self.state.label_map, self.state.regions, (0, h, 0, w))
         self.state.next_label_id = bundle.meta.next_label_id
         self.state.scale_mm_per_px = bundle.meta.scale_mm_per_px
         self.state.active_lasso = None
