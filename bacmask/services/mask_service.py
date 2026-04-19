@@ -152,6 +152,11 @@ class MaskService:
             label_id: masking.rasterize_polygon_mask(meta["vertices"], (h, w))
             for label_id, meta in self.state.regions.items()
         }
+        # One-time area sum per region at bundle load; cached thereafter so the
+        # results panel doesn't re-sum HxW masks on every refresh.
+        self.state.region_areas = {
+            label_id: int(mask.sum()) for label_id, mask in self.state.region_masks.items()
+        }
         self.state.label_map = np.zeros((h, w), dtype=np.uint16)
         masking.repaint_label_map(self.state.label_map, self.state.region_masks)
         self.state.next_label_id = bundle.meta.next_label_id
@@ -612,14 +617,16 @@ class MaskService:
     def compute_area_rows(self) -> list[io_manager.AreaRow]:
         """Per-region area rows. Counts each region's own pixels (region_masks),
         so overlapping pixels are counted once per region (knowledge/025).
+
+        Reads the per-region area from ``state.region_areas`` — kept in sync
+        by commands on every edit, so this method never re-sums HxW masks.
         """
         if self.state.image_filename is None or not self.state.regions:
             return []
         scale = self.state.scale_mm_per_px
         rows: list[io_manager.AreaRow] = []
         for label_id, meta in sorted(self.state.regions.items()):
-            region_mask = self.state.region_masks.get(label_id)
-            px = int(region_mask.sum()) if region_mask is not None else 0
+            px = self.state.region_areas.get(label_id, 0)
             rows.append(
                 io_manager.AreaRow(
                     filename=self.state.image_filename,

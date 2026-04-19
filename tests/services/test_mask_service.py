@@ -551,6 +551,7 @@ def test_area_uses_region_masks_not_label_map(tmp_path):
     # owned by a second region in the label_map. compute_area_rows must count
     # the region_mask, not the label_map — overlap-inclusive per knowledge/025.
     svc.state.region_masks[1] = np.ones_like(svc.state.label_map, dtype=bool)
+    svc.state.region_areas[1] = int(svc.state.region_masks[1].sum())
     rows = svc.compute_area_rows()
     h, w = svc.state.label_map.shape
     assert rows[0].area_px == h * w

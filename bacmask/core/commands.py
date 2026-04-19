@@ -34,6 +34,7 @@ class LassoCloseCommand:
         else:
             region_mask = masking.rasterize_polygon_mask(self.vertices, state.label_map.shape)
         state.region_masks[self.assigned_label_id] = region_mask
+        state.region_areas[self.assigned_label_id] = int(region_mask.sum())
         # Paint into the display cache — this region is the newest, so it wins
         # on any overlapping pixels per knowledge/025.
         state.label_map[region_mask] = self.assigned_label_id
@@ -46,10 +47,16 @@ class LassoCloseCommand:
         state.regions_version += 1
 
     def undo(self, state: Any) -> None:
-        state.region_masks.pop(self.assigned_label_id, None)
+        region_mask = state.region_masks.pop(self.assigned_label_id, None)
+        state.region_areas.pop(self.assigned_label_id, None)
         state.regions.pop(self.assigned_label_id, None)
-        # Rebuild the display cache from what's left.
-        masking.repaint_label_map(state.label_map, state.region_masks)
+        # Incremental repaint: only within the removed region's bbox. Pixels
+        # outside it were not painted with this label, so the rest of the
+        # display cache is already correct.
+        if region_mask is not None:
+            bbox = masking.mask_bbox(region_mask)
+            if bbox is not None:
+                masking.repaint_label_map_bbox(state.label_map, state.region_masks, bbox)
         state.next_label_id = self._prev_next_id
         state.dirty = True
         state.regions_version += 1
@@ -60,13 +67,19 @@ class DeleteRegionCommand:
     label_id: int
     _region_mask: np.ndarray | None = field(init=False, default=None)
     _region_meta: dict[str, Any] | None = field(init=False, default=None)
+    _region_area: int | None = field(init=False, default=None)
 
     def apply(self, state: Any) -> None:
         self._region_mask = state.region_masks.pop(self.label_id, None)
         self._region_meta = state.regions.pop(self.label_id, None)
-        # Rebuild display cache — dropping a region may expose other regions
-        # underneath if they overlapped.
-        masking.repaint_label_map(state.label_map, state.region_masks)
+        self._region_area = state.region_areas.pop(self.label_id, None)
+        # Bbox-scoped repaint — dropping a region may expose regions underneath
+        # where they overlapped. Only the dropped region's bbox needs to be
+        # recomputed.
+        if self._region_mask is not None:
+            bbox = masking.mask_bbox(self._region_mask)
+            if bbox is not None:
+                masking.repaint_label_map_bbox(state.label_map, state.region_masks, bbox)
         state.dirty = True
         state.regions_version += 1
 
@@ -75,7 +88,12 @@ class DeleteRegionCommand:
             state.region_masks[self.label_id] = self._region_mask
         if self._region_meta is not None:
             state.regions[self.label_id] = self._region_meta
-        masking.repaint_label_map(state.label_map, state.region_masks)
+        if self._region_area is not None:
+            state.region_areas[self.label_id] = self._region_area
+        if self._region_mask is not None:
+            bbox = masking.mask_bbox(self._region_mask)
+            if bbox is not None:
+                masking.repaint_label_map_bbox(state.label_map, state.region_masks, bbox)
         state.dirty = True
         state.regions_version += 1
 
@@ -94,6 +112,7 @@ class VertexEditCommand:
     new_vertices: np.ndarray
     _old_vertices: list[list[int]] | None = field(init=False, default=None)
     _old_region_mask: np.ndarray | None = field(init=False, default=None)
+    _old_region_area: int | None = field(init=False, default=None)
 
     def apply(self, state: Any) -> None:
         if self.label_id not in state.regions:
@@ -109,10 +128,20 @@ class VertexEditCommand:
         self._old_vertices = [list(v) for v in state.regions[self.label_id]["vertices"]]
         old_mask = state.region_masks.get(self.label_id)
         self._old_region_mask = old_mask.copy() if old_mask is not None else None
+        self._old_region_area = state.region_areas.get(self.label_id)
 
         new_mask = masking.rasterize_polygon_mask(new_verts, state.label_map.shape)
         state.region_masks[self.label_id] = new_mask
-        masking.repaint_label_map(state.label_map, state.region_masks)
+        state.region_areas[self.label_id] = int(new_mask.sum())
+        # Bbox-scoped repaint over the union of old and new footprints —
+        # pixels outside it never had this label, so the rest of the display
+        # cache is already correct.
+        bbox = masking.union_bbox(
+            masking.mask_bbox(self._old_region_mask) if self._old_region_mask is not None else None,
+            masking.mask_bbox(new_mask),
+        )
+        if bbox is not None:
+            masking.repaint_label_map_bbox(state.label_map, state.region_masks, bbox)
 
         state.regions[self.label_id]["vertices"] = new_verts.tolist()
         state.dirty = True
@@ -121,11 +150,21 @@ class VertexEditCommand:
     def undo(self, state: Any) -> None:
         if self._old_vertices is None:
             return
+        current_mask = state.region_masks.get(self.label_id)
         if self._old_region_mask is not None:
             state.region_masks[self.label_id] = self._old_region_mask
         else:
             state.region_masks.pop(self.label_id, None)
-        masking.repaint_label_map(state.label_map, state.region_masks)
+        if self._old_region_area is not None:
+            state.region_areas[self.label_id] = self._old_region_area
+        else:
+            state.region_areas.pop(self.label_id, None)
+        bbox = masking.union_bbox(
+            masking.mask_bbox(current_mask) if current_mask is not None else None,
+            masking.mask_bbox(self._old_region_mask) if self._old_region_mask is not None else None,
+        )
+        if bbox is not None:
+            masking.repaint_label_map_bbox(state.label_map, state.region_masks, bbox)
         state.regions[self.label_id]["vertices"] = self._old_vertices
         state.dirty = True
         state.regions_version += 1
@@ -150,6 +189,7 @@ class BrushStrokeCommand:
     new_region_mask: np.ndarray
     _old_vertices: list[list[int]] | None = field(init=False, default=None)
     _old_region_mask: np.ndarray | None = field(init=False, default=None)
+    _old_region_area: int | None = field(init=False, default=None)
 
     def apply(self, state: Any) -> None:
         if self.label_id not in state.regions:
@@ -171,22 +211,39 @@ class BrushStrokeCommand:
         self._old_vertices = [list(v) for v in state.regions[self.label_id]["vertices"]]
         old_mask = state.region_masks.get(self.label_id)
         self._old_region_mask = old_mask.copy() if old_mask is not None else None
+        self._old_region_area = state.region_areas.get(self.label_id)
 
         state.region_masks[self.label_id] = new_mask
+        state.region_areas[self.label_id] = int(new_mask.sum())
         state.regions[self.label_id]["vertices"] = new_verts.tolist()
-        masking.repaint_label_map(state.label_map, state.region_masks)
+        bbox = masking.union_bbox(
+            masking.mask_bbox(self._old_region_mask) if self._old_region_mask is not None else None,
+            masking.mask_bbox(new_mask),
+        )
+        if bbox is not None:
+            masking.repaint_label_map_bbox(state.label_map, state.region_masks, bbox)
         state.dirty = True
         state.regions_version += 1
 
     def undo(self, state: Any) -> None:
         if self._old_vertices is None:
             return
+        current_mask = state.region_masks.get(self.label_id)
         if self._old_region_mask is not None:
             state.region_masks[self.label_id] = self._old_region_mask
         else:
             state.region_masks.pop(self.label_id, None)
+        if self._old_region_area is not None:
+            state.region_areas[self.label_id] = self._old_region_area
+        else:
+            state.region_areas.pop(self.label_id, None)
         if self.label_id in state.regions:
             state.regions[self.label_id]["vertices"] = self._old_vertices
-        masking.repaint_label_map(state.label_map, state.region_masks)
+        bbox = masking.union_bbox(
+            masking.mask_bbox(current_mask) if current_mask is not None else None,
+            masking.mask_bbox(self._old_region_mask) if self._old_region_mask is not None else None,
+        )
+        if bbox is not None:
+            masking.repaint_label_map_bbox(state.label_map, state.region_masks, bbox)
         state.dirty = True
         state.regions_version += 1

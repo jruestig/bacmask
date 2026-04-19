@@ -25,6 +25,7 @@ from kivy.graphics import (
 from kivy.graphics.texture import Texture
 from kivy.uix.widget import Widget
 
+from bacmask.core import masking
 from bacmask.services.mask_service import MaskService
 from bacmask.ui.input.desktop_adapter import DesktopInputAdapter
 from bacmask.ui.input.events import (
@@ -74,6 +75,18 @@ class ImageCanvas(Widget):
         # -1 forces overlay rebuild on the first state notification even when
         # `regions_version` is still 0 (e.g. bundle loaded into a fresh state).
         self._last_regions_version: int = -1
+        # Persistent overlay accumulators — float32 alpha-over state kept
+        # across edits so a new region composites in O(bbox) rather than
+        # rebuilding the full HxW texture from every region each notify.
+        # See knowledge/004; replaces the prior O(N·H·W) per-edit rebuild.
+        self._overlay_acc_rgb: np.ndarray | None = None
+        self._overlay_acc_a: np.ndarray | None = None
+        self._overlay_rgba_buf: np.ndarray | None = None
+        # Snapshot of ``region_masks`` as last composited. Values are mask
+        # references (not copies) — when a command swaps in a new mask the
+        # old reference survives here until the next overlay update, which
+        # is when we diff and drop it.
+        self._overlay_tracked: dict[int, np.ndarray] = {}
         # Brush preview path in image-space coords. Source of truth for the
         # in-progress stroke's visible footprint — drawn as a single Kivy Line
         # with rounded caps/joints, which is far cheaper than re-blitting a
@@ -104,13 +117,16 @@ class ImageCanvas(Widget):
             self._last_image = state.image
             self._view_scale = 1.0
             self._view_offset = (0.0, 0.0)
-            # Force overlay rebuild at the new image dimensions.
+            # New image dimensions → drop the overlay accumulators so the
+            # next update allocates at the correct shape and re-composites
+            # from a clean slate.
+            self._overlay_reset()
             self._last_regions_version = -1
         # Overlay texture only rebuilds when regions actually change. Selection
         # / tool / calibration notifies skip this (and the per-frame lasso /
         # brush drag notifies too — they don't touch regions_version).
         if state.regions_version != self._last_regions_version:
-            self._rebuild_overlay_texture()
+            self._update_overlay()
             self._last_regions_version = state.regions_version
         self._repaint()
 
@@ -126,47 +142,185 @@ class ImageCanvas(Widget):
         tex.flip_vertical()
         self._image_texture = tex
 
-    def _rebuild_overlay_texture(self) -> None:
+    def _overlay_reset(self) -> None:
+        """Drop all overlay buffers. Next ``_update_overlay`` rebuilds from scratch."""
+        self._overlay_acc_rgb = None
+        self._overlay_acc_a = None
+        self._overlay_rgba_buf = None
+        self._overlay_texture = None
+        self._overlay_tracked = {}
+
+    def _update_overlay(self) -> None:
+        """Incrementally sync the overlay texture to the current ``region_masks``.
+
+        The old implementation rebuilt the full HxW RGBA buffer by iterating
+        every region on each ``regions_version`` bump — O(N·H·W) per edit,
+        which turned into O(N²·H·W) across N region creations and dominated
+        the perceived slowdown past ~20 regions.
+
+        This version keeps persistent float32 accumulators ``acc_rgb`` /
+        ``acc_a`` and a snapshot of the regions it last composited. On each
+        update it diffs against the snapshot and either:
+
+        * fast path: only additions whose ids are all greater than every
+          tracked id → alpha-over each new region on top within its bbox.
+          This covers the typical "drew another lasso" case.
+        * general path: zero the union bbox of every old mask that was
+          removed/changed and every new mask that was added/changed, then
+          recomposite only regions whose mask intersects that bbox.
+
+        The RGBA uint8 buffer is updated bbox-locally and re-uploaded as a
+        full-frame blit (one cheap GPU transfer). The accumulators never
+        escape this widget — they are strictly a rendering cache.
+        """
         lm = self.service.state.label_map
         regions = self.service.state.regions
         region_masks = self.service.state.region_masks
-        if lm is None or not regions:
-            self._overlay_texture = None
+        if lm is None or not region_masks:
+            self._overlay_reset()
             return
         h, w = lm.shape
 
-        # Alpha-over composite each region's color layer in ascending label order
-        # (oldest first). Overlap pixels blend both colors so the old region stays
-        # visible under the new one. See knowledge/025.
-        acc_rgb = np.zeros((h, w, 3), dtype=np.float32)
-        acc_a = np.zeros((h, w), dtype=np.float32)
+        # Lazy (re)allocate accumulators at the current image shape.
+        needs_alloc = self._overlay_acc_rgb is None or self._overlay_acc_rgb.shape[:2] != (h, w)
+        if needs_alloc:
+            self._overlay_acc_rgb = np.zeros((h, w, 3), dtype=np.float32)
+            self._overlay_acc_a = np.zeros((h, w), dtype=np.float32)
+            self._overlay_rgba_buf = np.zeros((h, w, 4), dtype=np.uint8)
+            self._overlay_tracked = {}
+
+        tracked = self._overlay_tracked
+        current_ids = set(region_masks.keys())
+        tracked_ids = set(tracked.keys())
+        added = current_ids - tracked_ids
+        removed = tracked_ids - current_ids
+        changed = {
+            lid for lid in current_ids & tracked_ids if region_masks[lid] is not tracked[lid]
+        }
+
+        if not (added or removed or changed):
+            # regions_version bumped with no actual mask change. Ensure the
+            # texture exists (e.g., after first build) and return.
+            if self._overlay_texture is None:
+                self._rebuild_rgba_bbox((0, h, 0, w))
+                self._blit_overlay_texture(h, w)
+            return
+
+        fast_add_only = (
+            not removed
+            and not changed
+            and added
+            and (not tracked_ids or min(added) > max(tracked_ids))
+        )
+
+        dirty_bbox: tuple[int, int, int, int] | None = None
+        if fast_add_only:
+            for lid in sorted(added):
+                if lid not in regions:
+                    continue
+                mask = region_masks[lid]
+                bbox = masking.mask_bbox(mask)
+                if bbox is None:
+                    continue
+                self._composite_region_bbox(lid, mask, bbox)
+                dirty_bbox = masking.union_bbox(dirty_bbox, bbox)
+        else:
+            for lid in removed | changed:
+                old = tracked.get(lid)
+                if old is not None:
+                    dirty_bbox = masking.union_bbox(dirty_bbox, masking.mask_bbox(old))
+            for lid in added | changed:
+                new = region_masks.get(lid)
+                if new is not None:
+                    dirty_bbox = masking.union_bbox(dirty_bbox, masking.mask_bbox(new))
+            if dirty_bbox is not None:
+                self._recomposite_bbox(dirty_bbox, region_masks, regions)
+
+        # Drop refs to masks no longer present; retain current references.
+        self._overlay_tracked = dict(region_masks)
+
+        if dirty_bbox is not None:
+            self._rebuild_rgba_bbox(dirty_bbox)
+            self._blit_overlay_texture(h, w)
+
+    def _composite_region_bbox(
+        self,
+        label_id: int,
+        mask: np.ndarray,
+        bbox: tuple[int, int, int, int],
+    ) -> None:
+        """Alpha-over ``mask`` with this region's color onto the accumulator,
+        restricted to ``bbox``. Safe to call when the region is newly the
+        topmost layer on the pixels it covers.
+        """
+        y0, y1, x0, x1 = bbox
+        acc_rgb = self._overlay_acc_rgb
+        acc_a = self._overlay_acc_a
+        assert acc_rgb is not None and acc_a is not None
+        sub_mask = mask[y0:y1, x0:x1]
+        if not sub_mask.any():
+            return
+        sub_rgb = acc_rgb[y0:y1, x0:x1]
+        sub_a = acc_a[y0:y1, x0:x1]
+        r, g, b = image_utils.region_color(label_id)
+        src_rgb = np.array([r, g, b], dtype=np.float32) / 255.0
         a_src = float(OVERLAY_ALPHA)
         one_minus = 1.0 - a_src
+        dst_a = sub_a[sub_mask]
+        out_a = a_src + dst_a * one_minus
+        weight_dst = (dst_a * one_minus / out_a)[:, None]
+        weight_src = (a_src / out_a)[:, None]
+        sub_rgb[sub_mask] = src_rgb[None, :] * weight_src + sub_rgb[sub_mask] * weight_dst
+        sub_a[sub_mask] = out_a
+
+    def _recomposite_bbox(
+        self,
+        bbox: tuple[int, int, int, int],
+        region_masks: dict[int, np.ndarray],
+        regions: dict[int, Any],
+    ) -> None:
+        """Zero the accumulator within ``bbox`` and re-paint every region whose
+        mask intersects it, in ascending label_id order (newest on top). This
+        is the correct fix-up for removals, subtracts, and shape edits that
+        could expose previously occluded layers.
+        """
+        y0, y1, x0, x1 = bbox
+        acc_rgb = self._overlay_acc_rgb
+        acc_a = self._overlay_acc_a
+        assert acc_rgb is not None and acc_a is not None
+        acc_rgb[y0:y1, x0:x1] = 0.0
+        acc_a[y0:y1, x0:x1] = 0.0
         for lid in sorted(region_masks):
             if lid not in regions:
                 continue
             mask = region_masks[lid]
-            if not mask.any():
+            if not mask[y0:y1, x0:x1].any():
                 continue
-            r, g, b = image_utils.region_color(lid)
-            src_rgb = np.array([r, g, b], dtype=np.float32) / 255.0
+            self._composite_region_bbox(lid, mask, bbox)
 
-            dst_a = acc_a[mask]
-            out_a = a_src + dst_a * one_minus
-            # out_a is strictly > 0 here since a_src > 0.
-            weight_dst = (dst_a * one_minus / out_a)[:, None]
-            weight_src = (a_src / out_a)[:, None]
-            acc_rgb[mask] = src_rgb[None, :] * weight_src + acc_rgb[mask] * weight_dst
-            acc_a[mask] = out_a
+    def _rebuild_rgba_bbox(self, bbox: tuple[int, int, int, int]) -> None:
+        """Convert float32 accumulators → uint8 RGBA within ``bbox``."""
+        y0, y1, x0, x1 = bbox
+        acc_rgb = self._overlay_acc_rgb
+        acc_a = self._overlay_acc_a
+        rgba = self._overlay_rgba_buf
+        assert acc_rgb is not None and acc_a is not None and rgba is not None
+        rgba[y0:y1, x0:x1, :3] = np.clip(acc_rgb[y0:y1, x0:x1] * 255.0, 0, 255).astype(np.uint8)
+        rgba[y0:y1, x0:x1, 3] = np.clip(acc_a[y0:y1, x0:x1] * 255.0, 0, 255).astype(np.uint8)
 
-        rgba = np.empty((h, w, 4), dtype=np.uint8)
-        rgba[..., :3] = np.clip(acc_rgb * 255.0, 0, 255).astype(np.uint8)
-        rgba[..., 3] = np.clip(acc_a * 255.0, 0, 255).astype(np.uint8)
-
-        tex = Texture.create(size=(w, h), colorfmt="rgba")
+    def _blit_overlay_texture(self, h: int, w: int) -> None:
+        """Upload the RGBA buffer to the GPU. Allocates a new ``Texture`` only
+        when the buffer shape changes — otherwise reuses the existing texture
+        via ``blit_buffer``.
+        """
+        rgba = self._overlay_rgba_buf
+        assert rgba is not None
+        tex = self._overlay_texture
+        if tex is None or tex.size != (w, h):
+            tex = Texture.create(size=(w, h), colorfmt="rgba")
+            tex.flip_vertical()
+            self._overlay_texture = tex
         tex.blit_buffer(rgba.tobytes(), colorfmt="rgba", bufferfmt="ubyte")
-        tex.flip_vertical()
-        self._overlay_texture = tex
 
     def _repaint(self) -> None:
         self.canvas.clear()

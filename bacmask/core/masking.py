@@ -69,6 +69,96 @@ def repaint_label_map(
         label_map[region_masks[label_id]] = label_id
 
 
+def repaint_label_map_bbox(
+    label_map: np.ndarray,
+    region_masks: dict[int, np.ndarray],
+    bbox: tuple[int, int, int, int],
+) -> None:
+    """Like :func:`repaint_label_map` but restricted to a ``(y0, y1, x0, x1)``
+    half-open sub-rectangle. Only regions whose mask intersects the bbox are
+    repainted; other pixels of ``label_map`` are left untouched. This is the
+    fast path used by commands after an incremental edit — full repaint costs
+    O(N·H·W); bbox repaint costs O(N·Δy·Δx) for the affected window only.
+    """
+    if label_map.dtype != np.uint16:
+        raise TypeError(f"label_map must be uint16, got {label_map.dtype}")
+    y0, y1, x0, x1 = bbox
+    if y0 >= y1 or x0 >= x1:
+        return
+    sub = label_map[y0:y1, x0:x1]
+    sub.fill(0)
+    for label_id in sorted(region_masks):
+        if not (0 < label_id <= _UINT16_MAX):
+            raise ValueError(f"label_id {label_id} out of uint16 range")
+        region_sub = region_masks[label_id][y0:y1, x0:x1]
+        if region_sub.any():
+            sub[region_sub] = label_id
+
+
+def vertices_bbox(
+    vertices: np.ndarray,
+    image_shape: tuple[int, int],
+    pad: int = 1,
+) -> tuple[int, int, int, int] | None:
+    """Return a clipped ``(y0, y1, x0, x1)`` half-open bbox covering ``vertices``.
+
+    The polygon rasterization via ``cv2.fillPoly`` stays within the vertex
+    bbox (inclusive). We return a half-open bbox padded by ``pad`` to
+    tolerate rounding when the polygon is re-derived from a cleaned contour.
+    Returns ``None`` for an empty vertex list.
+    """
+    verts = np.asarray(vertices, dtype=np.int32).reshape(-1, 2)
+    if len(verts) == 0:
+        return None
+    h, w = image_shape
+    x0 = int(verts[:, 0].min()) - pad
+    x1 = int(verts[:, 0].max()) + 1 + pad
+    y0 = int(verts[:, 1].min()) - pad
+    y1 = int(verts[:, 1].max()) + 1 + pad
+    x0 = max(0, x0)
+    y0 = max(0, y0)
+    x1 = min(w, x1)
+    y1 = min(h, y1)
+    if y0 >= y1 or x0 >= x1:
+        return None
+    return y0, y1, x0, x1
+
+
+def union_bbox(
+    a: tuple[int, int, int, int] | None,
+    b: tuple[int, int, int, int] | None,
+) -> tuple[int, int, int, int] | None:
+    """Half-open bbox union. ``None`` inputs are treated as empty."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return (
+        min(a[0], b[0]),
+        max(a[1], b[1]),
+        min(a[2], b[2]),
+        max(a[3], b[3]),
+    )
+
+
+def mask_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+    """Half-open ``(y0, y1, x0, x1)`` bbox of a bool mask's True pixels.
+
+    Returns ``None`` for an all-False mask. O(H+W) via axis reductions —
+    cheap relative to rewriting the mask.
+    """
+    m = np.asarray(mask, dtype=bool)
+    if not m.any():
+        return None
+    rows = np.any(m, axis=1)
+    cols = np.any(m, axis=0)
+    y0 = int(np.argmax(rows))
+    y1 = int(len(rows) - np.argmax(rows[::-1]))
+    x0 = int(np.argmax(cols))
+    x1 = int(len(cols) - np.argmax(cols[::-1]))
+    return y0, y1, x0, x1
+
+
 def polygon_area(vertices: np.ndarray) -> float:
     """Return the polygon's enclosed area in square pixels (shoelace / cv2).
 

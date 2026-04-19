@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kivy.graphics import Color, Rectangle
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
@@ -25,6 +26,13 @@ class ResultsTable(BoxLayout):
         self._last_regions_version: int = -1
         self._last_selected: int | None = None
         self._last_scale: float | None = None
+
+        # Per-region row widgets, keyed by region id. Refresh diffs against
+        # this dict and adds/removes/mutates widgets in place — the previous
+        # implementation did ``clear_widgets()`` + N fresh widget creations
+        # per notify, which costs O(N) widget lifecycle churn per edit and
+        # dominated the perceived slowdown past ~100 regions.
+        self._rows: dict[int, _Row] = {}
 
         header = BoxLayout(orientation="horizontal", size_hint_y=None, height=24)
         for text in ("ID", "Name", "px", "mm²"):
@@ -48,29 +56,66 @@ class ResultsTable(BoxLayout):
             and state.scale_mm_per_px == self._last_scale
         ):
             return
+        version_changed = state.regions_version != self._last_regions_version
+        selection_changed = state.selected_region_id != self._last_selected
+        scale_changed = state.scale_mm_per_px != self._last_scale
         self._last_regions_version = state.regions_version
         self._last_selected = state.selected_region_id
         self._last_scale = state.scale_mm_per_px
-        self._refresh()
 
-    def _refresh(self) -> None:
-        self.rows_box.clear_widgets()
+        if version_changed or scale_changed:
+            self._refresh_rows()
+        if selection_changed:
+            self._refresh_selection()
+
+    # ---- incremental refresh ------------------------------------------------
+
+    def _refresh_rows(self) -> None:
+        """Sync rows to the current region set.
+
+        Adds widgets for newly-created ids (new regions always have the highest
+        id, so the append order matches the existing sort), removes widgets for
+        deleted ids, and mutates Label text for any row whose data changed.
+        Only rows that actually differ pay a widget update cost.
+        """
         selected = self.service.state.selected_region_id
-        for row in self.service.compute_area_rows():
-            bg = (0.2, 0.3, 0.4, 1) if row.region_id == selected else (0, 0, 0, 0)
-            box = _Row(row.region_id, self.service, bg=bg)
-            box.add_widget(Label(text=str(row.region_id)))
-            box.add_widget(Label(text=row.region_name))
-            box.add_widget(Label(text=str(row.area_px)))
+        rows_data = self.service.compute_area_rows()
+        current_ids = {r.region_id for r in rows_data}
+
+        # Remove rows for deleted ids (iterate a list copy — we mutate the dict).
+        for stale_id in [rid for rid in self._rows if rid not in current_ids]:
+            self.rows_box.remove_widget(self._rows.pop(stale_id))
+
+        # Add/update rows in id order so the box layout stays sorted.
+        for row in rows_data:
+            widget = self._rows.get(row.region_id)
             mm2_text = "" if row.area_mm2 is None else f"{row.area_mm2:.4f}"
-            box.add_widget(Label(text=mm2_text))
-            self.rows_box.add_widget(box)
+            if widget is None:
+                widget = _Row(row.region_id, self.service)
+                widget.set_cells(row.region_name, row.area_px, mm2_text)
+                widget.set_selected(row.region_id == selected)
+                self._rows[row.region_id] = widget
+                self.rows_box.add_widget(widget)
+            else:
+                widget.set_cells(row.region_name, row.area_px, mm2_text)
+                widget.set_selected(row.region_id == selected)
+
+    def _refresh_selection(self) -> None:
+        """Update just the background tints — no widget churn, no label rebuild.
+
+        Fires on selection-only notifies (clicks in the canvas, arrow-key nav).
+        """
+        selected = self.service.state.selected_region_id
+        for region_id, widget in self._rows.items():
+            widget.set_selected(region_id == selected)
+
+
+_SELECTED_BG = (0.2, 0.3, 0.4, 1.0)
+_UNSELECTED_BG = (0.0, 0.0, 0.0, 0.0)
 
 
 class _Row(BoxLayout):
-    def __init__(self, region_id: int, service: MaskService, bg, **kwargs: Any) -> None:
-        from kivy.graphics import Color, Rectangle  # local import to avoid top-level dep
-
+    def __init__(self, region_id: int, service: MaskService, **kwargs: Any) -> None:
         kwargs.setdefault("orientation", "horizontal")
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", 24)
@@ -79,9 +124,37 @@ class _Row(BoxLayout):
         self.service = service
 
         with self.canvas.before:
-            Color(*bg)
+            self._bg_color = Color(*_UNSELECTED_BG)
             self._bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._sync_bg, size=self._sync_bg)
+
+        # Labels retained as attributes so refresh just mutates ``.text``
+        # instead of tearing down and recreating the widget tree.
+        self._id_label = Label(text=str(region_id))
+        self._name_label = Label(text="")
+        self._px_label = Label(text="")
+        self._mm2_label = Label(text="")
+        self.add_widget(self._id_label)
+        self.add_widget(self._name_label)
+        self.add_widget(self._px_label)
+        self.add_widget(self._mm2_label)
+
+    def set_cells(self, name: str, area_px: int, mm2_text: str) -> None:
+        """Mutate label text in place — no-op if unchanged so Kivy's texture
+        cache stays warm across brush strokes that don't actually move pixels.
+        """
+        px_text = str(area_px)
+        if self._name_label.text != name:
+            self._name_label.text = name
+        if self._px_label.text != px_text:
+            self._px_label.text = px_text
+        if self._mm2_label.text != mm2_text:
+            self._mm2_label.text = mm2_text
+
+    def set_selected(self, selected: bool) -> None:
+        rgba = _SELECTED_BG if selected else _UNSELECTED_BG
+        if tuple(self._bg_color.rgba) != rgba:
+            self._bg_color.rgba = rgba
 
     def _sync_bg(self, *_: Any) -> None:
         self._bg_rect.pos = self.pos

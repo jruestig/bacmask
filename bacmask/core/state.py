@@ -46,6 +46,11 @@ class SessionState:
     # Derived per-region bool masks, kept in sync by commands. Authoritative for
     # area and hit-testing against the target region (knowledge/025).
     region_masks: dict[int, np.ndarray] = field(default_factory=dict)
+    # Cached per-region pixel count (``mask.sum()``). Kept in sync by commands
+    # alongside ``region_masks`` so ``compute_area_rows`` doesn't have to re-sum
+    # every HxW mask on every results-panel refresh — that was O(N·H·W) per
+    # notify and dominated the perceived slowdown past ~100 regions.
+    region_areas: dict[int, int] = field(default_factory=dict)
     next_label_id: int = 1
     scale_mm_per_px: float | None = None
     # During drag this holds the growing list of captured samples; ndarray once
@@ -80,6 +85,7 @@ class SessionState:
         self.label_map = np.zeros((h, w), dtype=np.uint16)
         self.regions = {}
         self.region_masks = {}
+        self.region_areas = {}
         self.next_label_id = 1
         self.active_lasso = None
         self.active_brush_stroke = None

@@ -27,6 +27,7 @@ def _service_with_region(img_w: int = 50, img_h: int = 50) -> MaskService:
     verts = np.array([[10, 10], [20, 10], [20, 20], [10, 20]], dtype=np.int32)
     region_mask = masking.rasterize_polygon_mask(verts, (img_h, img_w))
     svc.state.region_masks[1] = region_mask
+    svc.state.region_areas[1] = int(region_mask.sum())
     svc.state.regions[1] = {"name": "region_01", "vertices": verts.tolist()}
     svc.state.next_label_id = 2
     masking.repaint_label_map(svc.state.label_map, svc.state.region_masks)
