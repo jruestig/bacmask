@@ -3,9 +3,15 @@ id: 029
 title: Incremental Overlay Compositor + Per-Region Area Cache
 tags: [perf, core, ui, services]
 created: 2026-04-19
-status: accepted
-related: [002, 003, 004, 025]
+superseded_on: 2026-04-19
+status: superseded
+superseded_by: 030
+related: [002, 003, 004, 025, 030]
 ---
+
+> **Superseded by [030 — Polygons Are the Only Mask Truth](../030-polygons-are-mask-truth.md).**
+>
+> This note documented an O(bbox) compositor + `region_areas` cache layered on top of per-region `region_masks`. The underlying premise — that per-region masks and their summed areas must be stored and kept in sync — was itself the root of the complexity. [030](../030-polygons-are-mask-truth.md) deletes `region_masks` and `region_areas` entirely; area becomes shoelace, rendering walks polygons. The "rewrite hints" section of this note (sparse masks, bbox cache, ref-not-copy undo) is resolved by not storing masks in the first place. Kept here for reasoning trail.
 
 # Incremental Overlay Compositor + Per-Region Area Cache
 

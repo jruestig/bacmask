@@ -65,6 +65,13 @@ def test_keybinding_tab_toggles_brush_mode():
     assert keybinding_for("tab", set()) == "toggle_brush_mode"
 
 
+def test_keybinding_arrow_keys_pan():
+    assert keybinding_for("left", set()) == "pan_left"
+    assert keybinding_for("right", set()) == "pan_right"
+    assert keybinding_for("up", set()) == "pan_up"
+    assert keybinding_for("down", set()) == "pan_down"
+
+
 def test_keybinding_e_alone_unbound():
     """`e` alone was previously toggle_edit_mode (knowledge/026 supersedes 023);
     it is now intentionally unbound to keep discoverability honest."""

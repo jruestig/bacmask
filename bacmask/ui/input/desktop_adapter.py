@@ -33,6 +33,10 @@ DEFAULT_KEYBINDINGS: dict[tuple[str, frozenset[str]], str] = {
     ("l", frozenset()): "select_lasso",
     ("b", frozenset()): "select_brush",
     ("tab", frozenset()): "toggle_brush_mode",
+    ("left", frozenset()): "pan_left",
+    ("right", frozenset()): "pan_right",
+    ("up", frozenset()): "pan_up",
+    ("down", frozenset()): "pan_down",
 }
 
 _TRACKED_MODIFIERS = ("ctrl", "shift", "alt", "meta")
@@ -55,6 +59,10 @@ _KEY_DISPLAY: dict[str, str] = {
     "delete": "Del",
     "backspace": "Backspace",
     "tab": "Tab",
+    "left": "←",
+    "right": "→",
+    "up": "↑",
+    "down": "↓",
 }
 
 # Ordered list — modifiers render in this order regardless of set iteration.

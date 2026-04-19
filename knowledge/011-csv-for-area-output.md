@@ -3,8 +3,9 @@ id: 011
 title: CSV for Area Output
 tags: [architecture, core]
 created: 2026-04-17
+updated: 2026-04-19
 status: accepted
-related: [000, 005, 012, 014, 015, 017]
+related: [000, 005, 012, 014, 015, 017, 030]
 ---
 
 # CSV for Area Output
@@ -23,7 +24,7 @@ filename, region_id, region_name, area_px, area_mm2, scale_factor
 | `filename` | str | Full source filename with extension (e.g. `20251112093808947.tif`). Not a path. |
 | `region_id` | int | Auto-assigned, monotonic, never reused. See [014](014-lasso-tool.md). |
 | `region_name` | str | Auto-generated (`region_01`, `region_02`, …). Future: user-editable. |
-| `area_px` | int | Always populated. Canonical measurement. |
+| `area_px` | float | Always populated. Shoelace of the polygon in px² units (see [030](030-polygons-are-mask-truth.md)). Written with Python's default float repr. |
 | `area_mm2` | float or "" | Empty string when uncalibrated. |
 | `scale_factor` | float or "" | mm per pixel. Empty when uncalibrated. |
 
@@ -36,6 +37,10 @@ filename, region_id, region_name, area_px, area_mm2, scale_factor
 
 ## Uncalibrated rows
 `area_mm2` and `scale_factor` are empty strings — not `NaN`, not `0`. Empty preserves the "unknown" semantic without a magic number. See [017 — Calibration Input](017-calibration-input.md).
+
+## `area_px` migration note
+
+Pre-[030](030-polygons-are-mask-truth.md) builds wrote `area_px` as `mask.sum()` after `cv2.fillPoly` with the even-odd rule — an integer pixel count. Current builds write the mathematical enclosed area (shoelace), which is a float. Numbers differ by ≲1% for convex clean polygons; up to a few percent for thin or noisy boundaries. The new value is the correct one for scientific reporting. Re-export to refresh old CSVs.
 
 ## Rationale
 - **Universal consumption.** pandas, Excel, R, Julia — zero parser overhead.

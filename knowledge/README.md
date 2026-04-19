@@ -61,8 +61,11 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Conversatio
 - [027 — Toolbar Hotkey Labels](027-toolbar-hotkey-labels.md)
 - [028 — File Picker Double-Click to Open](028-file-picker-double-click.md)
 
-### Performance (2026-04-19)
-- [029 — Incremental Overlay Compositor + Per-Region Area Cache](029-incremental-overlay-and-area-cache.md)
+### Architecture doctrine (2026-04-19)
+- [030 — Polygons Are the Only Mask Truth](030-polygons-are-mask-truth.md) — anchor: no per-region masks, area via shoelace, rendering and hit-testing are polygon projections. Supersedes 029.
+
+### Navigation (2026-04-19)
+- [031 — Minimap Navigator + Keyboard Pan](031-minimap-navigator.md)
 
 ### Superseded (archived in [`superseded/`](superseded/))
 Retired decisions kept for reasoning trails and decision-record context. Do **not** implement against these — each carries a banner pointing to its replacement.
@@ -71,6 +74,7 @@ Retired decisions kept for reasoning trails and decision-record context. Do **no
 - [018 — Load Mask Dimension Mismatch](superseded/018-load-mask-dim-mismatch.md) — superseded by 015 + 025. No in-bundle mask to dimension-check.
 - [021 — Edit Collision Policy (Clip)](superseded/021-vertex-edit-collision.md) — superseded by 025. Overlap is allowed; no clip rule.
 - [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) — superseded by 026. Brush replaces the lasso-against-region stroke.
+- [029 — Incremental Overlay Compositor + Per-Region Area Cache](superseded/029-incremental-overlay-and-area-cache.md) — superseded by 030. The compositor+cache machinery existed to keep per-region masks in sync; with polygons canonical there are no masks to cache.
 
 ## Tags
 - `architecture` — structural decisions

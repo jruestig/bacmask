@@ -101,6 +101,8 @@ class BacMaskApp(App):
             svc.toggle_brush_default_mode()
         elif action == "load_image":
             self._open_load_dialog()
+        elif action in ("pan_left", "pan_right", "pan_up", "pan_down"):
+            self.screen.canvas_widget.pan_by_action(action)
         else:
             return False
         return True
@@ -206,6 +208,10 @@ _SPECIAL_KEYS: dict[int, str] = {
     27: "escape",
     127: "delete",
     8: "backspace",
+    273: "up",
+    274: "down",
+    275: "right",
+    276: "left",
 }
 
 

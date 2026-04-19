@@ -64,6 +64,18 @@ VIEW_SCALE_MAX = 20.0
 # Fraction of the fit-displayed image that must remain visible in either axis.
 PAN_KEEP_VISIBLE_FRAC = 0.1
 
+# Minimap navigator — see knowledge/031.
+MINIMAP_MAX = 220.0  # widget-px: max extent along either axis
+MINIMAP_MARGIN = 12.0
+MINIMAP_BG_COLOR = (0.05, 0.05, 0.05, 0.55)
+MINIMAP_BORDER_COLOR = (1.0, 1.0, 1.0, 0.7)
+MINIMAP_VIEWPORT_COLOR = SELECTED_OUTLINE_COLOR
+
+# Arrow-key pan step is 10% of the canvas short side, clamped to this range.
+PAN_STEP_MIN = 40.0
+PAN_STEP_MAX = 120.0
+PAN_STEP_FRAC = 0.10
+
 
 class ImageCanvas(Widget):
     def __init__(self, service: MaskService, **kwargs: Any) -> None:
@@ -101,6 +113,10 @@ class ImageCanvas(Widget):
         # view_offset is in display-space (top-down Y) pixels.
         self._view_scale: float = 1.0
         self._view_offset: tuple[float, float] = (0.0, 0.0)
+
+        # True while a PointerDown landed inside the minimap and the gesture
+        # has not yet ended. Drives viewport re-centering on subsequent moves.
+        self._minimap_drag: bool = False
 
         service.subscribe(self._on_state_changed)
         self.bind(size=lambda *a: self._repaint(), pos=lambda *a: self._repaint())
@@ -417,6 +433,10 @@ class ImageCanvas(Widget):
             Rectangle(pos=stencil_pos, size=stencil_size)
             StencilPop()
 
+            # Minimap is drawn *after* the stencil pop so the corner overlay
+            # is never clipped by the stencil that protects the toolbar edge.
+            self._draw_minimap((img_w, img_h))
+
     def _draw_brush_preview(
         self,
         mode: str,
@@ -508,17 +528,172 @@ class ImageCanvas(Widget):
         out[1::2] = ys
         return out.tolist()
 
+    # ---- minimap navigator (knowledge/031) ---------------------------------
+
+    def _minimap_rect(
+        self,
+        image_size: tuple[int, int],
+    ) -> tuple[float, float, float, float] | None:
+        """Return ``(x_left, y_bottom, mm_w, mm_h)`` in widget Y-up coords, or ``None``.
+
+        Returns ``None`` when not zoomed in or when the image is missing —
+        the minimap is hidden in those cases (see knowledge/031).
+        """
+        if self._view_scale <= 1.0 + 1e-6:
+            return None
+        img_w, img_h = image_size
+        if img_w <= 0 or img_h <= 0:
+            return None
+        scale = min(MINIMAP_MAX / img_w, MINIMAP_MAX / img_h)
+        mm_w = img_w * scale
+        mm_h = img_h * scale
+        if mm_w >= self.width - 2 * MINIMAP_MARGIN or mm_h >= self.height - 2 * MINIMAP_MARGIN:
+            # Canvas too small — hide minimap rather than cover the whole view.
+            return None
+        x_left = self.x + self.width - MINIMAP_MARGIN - mm_w
+        y_top = self.y + self.height - MINIMAP_MARGIN
+        y_bot = y_top - mm_h
+        return x_left, y_bot, mm_w, mm_h
+
+    def _draw_minimap(self, image_size: tuple[int, int]) -> None:
+        rect = self._minimap_rect(image_size)
+        if rect is None or self._image_texture is None:
+            return
+        x_left, y_bot, mm_w, mm_h = rect
+        img_w, img_h = image_size
+
+        Color(*MINIMAP_BG_COLOR)
+        Rectangle(pos=(x_left - 2, y_bot - 2), size=(mm_w + 4, mm_h + 4))
+
+        Color(1, 1, 1, 1)
+        Rectangle(texture=self._image_texture, pos=(x_left, y_bot), size=(mm_w, mm_h))
+
+        if self._overlay_texture is not None:
+            Color(1, 1, 1, 1)
+            Rectangle(texture=self._overlay_texture, pos=(x_left, y_bot), size=(mm_w, mm_h))
+
+        Color(*MINIMAP_BORDER_COLOR)
+        Line(rectangle=(x_left, y_bot, mm_w, mm_h), width=1.0)
+
+        # Viewport rectangle — image-space bbox of what's currently visible.
+        tl = image_utils.display_to_image_view(
+            (0.0, 0.0),
+            (img_w, img_h),
+            (self.width, self.height),
+            self._view_scale,
+            self._view_offset,
+        )
+        br = image_utils.display_to_image_view(
+            (float(self.width), float(self.height)),
+            (img_w, img_h),
+            (self.width, self.height),
+            self._view_scale,
+            self._view_offset,
+        )
+        scale = mm_w / img_w
+        ix0 = max(0.0, min(float(img_w), tl[0]))
+        iy0 = max(0.0, min(float(img_h), tl[1]))
+        ix1 = max(0.0, min(float(img_w), br[0]))
+        iy1 = max(0.0, min(float(img_h), br[1]))
+        if ix1 <= ix0 or iy1 <= iy0:
+            return
+        y_top = y_bot + mm_h
+        vp_x = x_left + ix0 * scale
+        vp_w = (ix1 - ix0) * scale
+        vp_h = (iy1 - iy0) * scale
+        vp_y_top = y_top - iy0 * scale
+        vp_y_bot = vp_y_top - vp_h
+        Color(*MINIMAP_VIEWPORT_COLOR)
+        Line(rectangle=(vp_x, vp_y_bot, vp_w, vp_h), width=1.4)
+
+    def _minimap_hit(self, window_pos: tuple[float, float], image_size: tuple[int, int]) -> bool:
+        rect = self._minimap_rect(image_size)
+        if rect is None:
+            return False
+        x_left, y_bot, mm_w, mm_h = rect
+        wx, wy = window_pos
+        return x_left <= wx <= x_left + mm_w and y_bot <= wy <= y_bot + mm_h
+
+    def _minimap_center_on(
+        self,
+        window_pos: tuple[float, float],
+        image_size: tuple[int, int],
+    ) -> None:
+        """Re-center the viewport on the image pixel under ``window_pos`` in the minimap."""
+        rect = self._minimap_rect(image_size)
+        if rect is None:
+            return
+        x_left, y_bot, mm_w, mm_h = rect
+        img_w, img_h = image_size
+        scale = mm_w / img_w
+        y_top = y_bot + mm_h
+        wx, wy = window_pos
+        ix = (wx - x_left) / scale
+        iy = (y_top - wy) / scale
+        ix = max(0.0, min(float(img_w), ix))
+        iy = max(0.0, min(float(img_h), iy))
+
+        s, off_x, off_y, _, _ = image_utils.fit_to_widget((img_w, img_h), (self.width, self.height))
+        total = s * self._view_scale
+        new_vox = self.width / 2 - ix * total - off_x
+        new_voy = self.height / 2 - iy * total - off_y
+        self._view_offset = self._clamp_offset((new_vox, new_voy), image_size)
+        self._repaint()
+
+    # ---- public pan (keyboard arrows, knowledge/031) -----------------------
+
+    def pan_by_action(self, action: str) -> None:
+        """Pan the viewport by a fixed step in response to an arrow-key action."""
+        img = self.service.state.image
+        if img is None:
+            return
+        img_h, img_w = img.shape[:2]
+        short = min(self.width, self.height)
+        if short <= 0:
+            return
+        step = max(PAN_STEP_MIN, min(PAN_STEP_MAX, short * PAN_STEP_FRAC))
+        if action == "pan_left":
+            delta = (step, 0.0)
+        elif action == "pan_right":
+            delta = (-step, 0.0)
+        elif action == "pan_up":
+            delta = (0.0, -step)
+        elif action == "pan_down":
+            delta = (0.0, step)
+        else:
+            return
+        self._apply_pan(delta, (img_w, img_h))
+
     # ---- input -------------------------------------------------------------
 
     def on_touch_down(self, touch) -> bool:
         if not self.collide_point(*touch.pos):
             return False
+        img = self.service.state.image
+        if img is not None:
+            img_h, img_w = img.shape[:2]
+            if self._minimap_hit(touch.pos, (img_w, img_h)):
+                self._minimap_drag = True
+                self._minimap_center_on(touch.pos, (img_w, img_h))
+                touch.grab(self)
+                return True
         return self._input.on_touch_down(touch)
 
     def on_touch_move(self, touch) -> bool:
+        if self._minimap_drag:
+            img = self.service.state.image
+            if img is not None:
+                img_h, img_w = img.shape[:2]
+                self._minimap_center_on(touch.pos, (img_w, img_h))
+            return True
         return self._input.on_touch_move(touch)
 
     def on_touch_up(self, touch) -> bool:
+        if self._minimap_drag:
+            self._minimap_drag = False
+            if touch.grab_current is self:
+                touch.ungrab(self)
+            return True
         return self._input.on_touch_up(touch)
 
     def _on_input(self, event: InputEvent) -> None:
@@ -712,6 +887,8 @@ class ImageCanvas(Widget):
             svc.set_active_tool("brush")
         elif name == "toggle_brush_mode":
             svc.toggle_brush_default_mode()
+        elif name in ("pan_left", "pan_right", "pan_up", "pan_down"):
+            self.pan_by_action(name)
 
     def _widget_pos_to_image(
         self,

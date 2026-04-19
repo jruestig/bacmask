@@ -161,3 +161,106 @@ def test_round_trip_image_to_widget_under_non_identity_view():
     wx, wy = flat[0], flat[1]
     xy = canvas._widget_pos_to_image((wx, wy), (100, 200))
     assert xy == image_pt
+
+
+# ---- arrow-key pan (knowledge/031) -----------------------------------------
+
+
+def test_pan_by_action_left_moves_view_offset_positive_x():
+    svc = _mock_service_with_image(2000, 1000)
+    canvas = _canvas(svc)
+    canvas._view_scale = 3.0  # zoomed in so pan isn't clamped to zero
+    before = canvas._view_offset
+    canvas.pan_by_action("pan_left")
+    # pan_left reveals more of the image's left edge → vox must increase.
+    assert canvas._view_offset[0] > before[0]
+    assert canvas._view_offset[1] == pytest.approx(before[1])
+
+
+def test_pan_by_action_right_moves_view_offset_negative_x():
+    svc = _mock_service_with_image(2000, 1000)
+    canvas = _canvas(svc)
+    canvas._view_scale = 3.0
+    before = canvas._view_offset
+    canvas.pan_by_action("pan_right")
+    assert canvas._view_offset[0] < before[0]
+    assert canvas._view_offset[1] == pytest.approx(before[1])
+
+
+def test_pan_by_action_up_and_down_mirror_each_other():
+    svc = _mock_service_with_image(2000, 1000)
+    canvas = _canvas(svc)
+    canvas._view_scale = 3.0
+    up_start = canvas._view_offset
+    canvas.pan_by_action("pan_up")
+    after_up = canvas._view_offset
+    canvas._view_offset = up_start
+    canvas.pan_by_action("pan_down")
+    after_down = canvas._view_offset
+    # Up and down are symmetric: equal magnitude, opposite sign on the y axis.
+    assert (after_up[1] - up_start[1]) == pytest.approx(-(after_down[1] - up_start[1]))
+
+
+def test_pan_by_action_no_image_is_noop():
+    svc = MaskService()
+    canvas = _canvas(svc)
+    before = canvas._view_offset
+    canvas.pan_by_action("pan_left")
+    assert canvas._view_offset == before
+
+
+# ---- minimap navigator (knowledge/031) -------------------------------------
+
+
+def test_minimap_hidden_when_not_zoomed():
+    svc = _mock_service_with_image(800, 600)
+    canvas = _canvas(svc)
+    assert canvas._minimap_rect((800, 600)) is None
+
+
+def test_minimap_visible_when_zoomed_in():
+    svc = _mock_service_with_image(800, 600)
+    canvas = _canvas(svc)
+    canvas._view_scale = 2.0
+    rect = canvas._minimap_rect((800, 600))
+    assert rect is not None
+    x_left, y_bot, mm_w, mm_h = rect
+    # Anchored at top-right of the widget.
+    assert x_left + mm_w == pytest.approx(canvas.width - 12.0, abs=0.5)
+    assert y_bot + mm_h == pytest.approx(canvas.height - 12.0, abs=0.5)
+    # Aspect ratio preserved.
+    assert mm_w / mm_h == pytest.approx(800 / 600, rel=1e-3)
+
+
+def test_minimap_hit_only_inside_rect():
+    svc = _mock_service_with_image(800, 600)
+    canvas = _canvas(svc)
+    canvas._view_scale = 2.0
+    x_left, y_bot, mm_w, mm_h = canvas._minimap_rect((800, 600))  # type: ignore[misc]
+    assert canvas._minimap_hit((x_left + mm_w / 2, y_bot + mm_h / 2), (800, 600))
+    assert not canvas._minimap_hit((x_left - 5, y_bot + mm_h / 2), (800, 600))
+    assert not canvas._minimap_hit((x_left + mm_w / 2, y_bot - 5), (800, 600))
+
+
+def test_minimap_center_on_places_image_point_at_widget_center():
+    svc = _mock_service_with_image(800, 600)
+    canvas = _canvas(svc)
+    canvas._view_scale = 4.0
+    x_left, y_bot, mm_w, mm_h = canvas._minimap_rect((800, 600))  # type: ignore[misc]
+    # Pick an off-center spot in the minimap and center on it.
+    scale = mm_w / 800.0
+    target_ix, target_iy = 600.0, 120.0
+    wx = x_left + target_ix * scale
+    wy = y_bot + mm_h - target_iy * scale
+    canvas._minimap_center_on((wx, wy), (800, 600))
+    center_ix, center_iy = image_utils.display_to_image_view(
+        (canvas.width / 2, canvas.height / 2),
+        (800, 600),
+        (canvas.width, canvas.height),
+        canvas._view_scale,
+        canvas._view_offset,
+    )
+    # After clamping, the targeted image point is at widget center (or as close
+    # as the clamp allows — the point is well inside, so it should be exact).
+    assert center_ix == pytest.approx(target_ix, abs=0.5)
+    assert center_iy == pytest.approx(target_iy, abs=0.5)

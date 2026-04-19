@@ -5,7 +5,7 @@ tags: [architecture, core, ui]
 created: 2026-04-19
 updated: 2026-04-19
 status: accepted
-related: [002, 003, 013, 014, 016, 023, 025, 027]
+related: [002, 003, 013, 014, 016, 023, 025, 027, 030]
 ---
 
 # Brush Edit Model
@@ -70,13 +70,13 @@ Drag accumulates pointer samples. Each sample stamps a filled disc of radius `br
 
 ## Release
 
-Release commits per mode:
+Release commits per mode. The commit path uses **transient, bbox-local rasters** — no per-region mask is ever written to state ([030](030-polygons-are-mask-truth.md)). The rasters exist for the duration of a single commit (microseconds) and are discarded once the new vertex list has been extracted.
 
-- **Create**: largest connected component of `S` within the stroke bbox → `contour_vertices` → `LassoCloseCommand` with the cleaned mask + vertices.
-- **Add / Subtract**: combine `S` with the target's mask within the stroke bbox; if the result equals the target (no-op), discard. Otherwise re-derive vertices from the cleaned bbox-CC and commit a `BrushStrokeCommand`.
-- **Subtract that empties the target**: if `new_mask` has no surviving pixels, fire a `DeleteRegionCommand` instead — same code path as explicit delete, so undo + monotonic-id behavior stay unified.
+- **Create**: `largest_connected_component(S[bbox])` → `contour_vertices` → translate back to image-space → `LassoCloseCommand(new_vertices)`.
+- **Add / Subtract**: rasterize the target polygon **only within the stroke bbox** (or the union bbox for add, when the stroke extends past the target) into a scratch bool crop `T`. Boolean op: `N = T | S_crop` (add) or `T & ~S_crop` (subtract). If `N == T` (no pixels changed), discard the stroke — no-op. Otherwise `largest_connected_component(N)` → `contour_vertices` → translate back → `BrushStrokeCommand(label_id, new_vertices)`. Only the vertex list is committed; the scratch crops are thrown away.
+- **Subtract that empties the target**: if `N` has no surviving True pixels, fire a `DeleteRegionCommand(label_id)` instead — same code path as explicit delete, so undo + monotonic-id behavior stay unified.
 
-Vertex re-derivation always runs `largest_connected_component` + `contour_vertices` on the post-edit mask, restricted to its bounding box. Stored polygons are simple closed curves tracing the filled region's real boundary — same pipeline as [close_lasso cleanup](014-lasso-tool.md).
+Every post-edit vertex list runs through `largest_connected_component` + `contour_vertices` on the scratch crop. Stored polygons are simple closed curves tracing the edit result's real boundary — same pipeline as [close_lasso cleanup](014-lasso-tool.md).
 
 ## Brush size
 
@@ -110,11 +110,11 @@ Same applies to clicking the toolbar buttons. Rationale: once a user has started
 
 ## Commands
 
-One stroke → one command on the undo stack:
+One stroke → one command on the undo stack. Commands store vertex lists only; there are no mask fields ([030](030-polygons-are-mask-truth.md)):
 
-- `LassoCloseCommand` — fired by create mode (and the lasso tool).
-- `BrushStrokeCommand(label_id, new_vertices, new_region_mask)` — fired by add/subtract. Stores the pre-edit `old_vertices` + `old_region_mask` for undo.
-- `DeleteRegionCommand` — when a subtract empties the region.
+- `LassoCloseCommand(vertices)` — fired by create mode (and the lasso tool).
+- `BrushStrokeCommand(label_id, new_vertices)` — fired by add/subtract. Stores `_old_vertices` for undo.
+- `DeleteRegionCommand(label_id)` — when a subtract empties the region. Stores the popped `name` + `vertices` for undo.
 
 ## Validation & discard rules
 
@@ -160,8 +160,9 @@ The commit path is bbox-restricted: connected-component analysis and contour re-
 
 - [014 — Lasso Tool](014-lasso-tool.md) — outline-trace creation, the other tool.
 - [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) — superseded model.
-- [003 — Undo/Redo Commands](003-undo-redo-commands.md) — `BrushStrokeCommand`.
+- [003 — Undo/Redo Commands](003-undo-redo-commands.md) — `BrushStrokeCommand` (vertex-only snapshots).
 - [013 — Minimal Toolset](013-minimal-toolset.md) — scope lock.
 - [016 — Input Abstraction](016-input-abstraction.md) — semantic events + keybindings.
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — per-target edit invariant.
 - [027 — Toolbar Hotkey Labels](027-toolbar-hotkey-labels.md) — labels and the Tab cycle.
+- [030 — Polygons Are the Only Mask Truth](030-polygons-are-mask-truth.md) — commit uses transient bbox raster; no per-region mask stored.

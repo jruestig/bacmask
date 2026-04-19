@@ -4,7 +4,7 @@ title: Input Abstraction Layer
 tags: [architecture, ui]
 created: 2026-04-17
 status: accepted
-related: [001, 010, 014, 020]
+related: [001, 010, 014, 020, 031]
 ---
 
 # Input Abstraction Layer
@@ -20,7 +20,7 @@ All raw gestures are translated into a small vocabulary of **semantic input even
 - `PointerUp(pos)`
 - `Zoom(center, delta)` — wheel on desktop; pinch on touch (future).
 - `Pan(delta)` — middle-mouse drag / gesture.
-- `Action(name)` — e.g. `"close_lasso"`, `"cancel_stroke"`, `"delete_region"`, `"undo"`, `"redo"`, `"save_bundle"`, `"export_csv"`, `"load_image"`, `"select_lasso"`, `"select_brush"`, `"toggle_brush_mode"`.
+- `Action(name)` — e.g. `"close_lasso"`, `"cancel_stroke"`, `"delete_region"`, `"undo"`, `"redo"`, `"save_bundle"`, `"export_csv"`, `"load_image"`, `"select_lasso"`, `"select_brush"`, `"toggle_brush_mode"`, `"pan_left"`, `"pan_right"`, `"pan_up"`, `"pan_down"`.
 
 ## Adapters
 - `DesktopInputAdapter` — translates Kivy mouse/keyboard events.
@@ -36,6 +36,7 @@ All raw gestures are translated into a small vocabulary of **semantic input even
   - `Ctrl+O` → `Action("load_image")`.
   - `L` / `B` → `Action("select_lasso" | "select_brush")`.
   - `Tab` → `Action("toggle_brush_mode")` — cycles `create → add → subtract → create`.
+  - `←` / `→` / `↑` / `↓` → `Action("pan_left" | "pan_right" | "pan_up" | "pan_down")` — see [031](031-minimap-navigator.md).
 - `TouchInputAdapter` (future, post-MVP — see [020](020-platform-scope.md)) — multi-touch gestures.
   - Single-finger drag → pointer sequence.
   - Two-finger pinch → `Zoom`.

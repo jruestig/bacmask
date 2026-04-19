@@ -51,6 +51,7 @@ knowledge base. Start here:
 - [knowledge/026 — Brush Edit Model (Shift add / Ctrl subtract)](knowledge/026-brush-edit-model.md)
 - [knowledge/027 — Toolbar Hotkey Labels](knowledge/027-toolbar-hotkey-labels.md)
 - [knowledge/028 — File Picker Double-Click to Open](knowledge/028-file-picker-double-click.md)
+- [knowledge/031 — Minimap Navigator + Keyboard Pan](knowledge/031-minimap-navigator.md)
 
 ## Core Concepts (contracts)
 
@@ -101,6 +102,7 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
 1. **Image Canvas:**
    - Displays the loaded image **in original color** with mask overlay (semi-transparent, color-coded per region).
    - Supports pan and zoom (wheel zoom on desktop; touch gestures post-MVP).
+   - **Minimap navigator** appears in the top-right corner only while zoomed in (`view_scale > 1.0`): a small thumbnail of the full image with a viewport rectangle. Tap or drag inside the minimap to re-center the viewport. Arrow keys (`←`/`→`/`↑`/`↓`) pan the view by a fixed step. See [knowledge/031](knowledge/031-minimap-navigator.md).
    - **Masks remain visible at all times.** They are never auto-hidden or cleared.
      The user must explicitly clear or delete them.
 
