@@ -4,6 +4,7 @@ import pytest
 from bacmask.core.commands import (
     DeleteRegionCommand,
     LassoCloseCommand,
+    RegionEditCommand,
     VertexEditCommand,
 )
 from bacmask.core.state import SessionState
@@ -157,8 +158,11 @@ def test_vertex_edit_apply_undo_apply_is_idempotent():
     assert s.regions[1]["vertices"] == after_verts
 
 
-def test_vertex_edit_clips_around_adjacent_region():
-    """New polygon crosses into region 2's territory; region 2 must be untouched."""
+def test_vertex_edit_allows_overlap_with_neighbor():
+    """No clip rule (knowledge/025). Region 1's expanded mask includes pixels
+    that region 2 also claims; region 2's own mask is unchanged; the display
+    label_map shows the higher id on the overlap.
+    """
     s = _state(h=50, w=50)
     LassoCloseCommand(np.array([[5, 5], [15, 5], [15, 15], [5, 15]], dtype=np.int32)).apply(
         s
@@ -167,32 +171,37 @@ def test_vertex_edit_clips_around_adjacent_region():
         s
     )  # region 2
 
-    region2_pixels_before = (s.label_map == 2).sum()
-    pixel_22_10_before = s.label_map[10, 22]  # inside region 2
+    region2_mask_before = s.region_masks[2].copy()
 
     # Edit region 1 to extend into region 2's column range.
     new_verts = np.array([[5, 5], [25, 5], [25, 15], [5, 15]], dtype=np.int32)
     VertexEditCommand(label_id=1, new_vertices=new_verts).apply(s)
 
-    # Region 2 intact (clip policy).
-    assert (s.label_map == 2).sum() == region2_pixels_before
-    assert s.label_map[10, 22] == pixel_22_10_before == 2
-    # Background between the two regions now owned by region 1.
+    # Region 2's own mask is untouched.
+    assert np.array_equal(s.region_masks[2], region2_mask_before)
+    # Region 1 now claims the overlap pixels in its own mask.
+    assert s.region_masks[1][10, 22]
+    # Display cache: higher id on overlap; label 1 in the newly-claimed gap.
+    assert s.label_map[10, 22] == 2
     assert s.label_map[10, 18] == 1
 
 
-def test_vertex_edit_clip_is_reversible():
+def test_vertex_edit_overlap_is_reversible():
     s = _state(h=50, w=50)
     LassoCloseCommand(np.array([[5, 5], [15, 5], [15, 15], [5, 15]], dtype=np.int32)).apply(s)
     LassoCloseCommand(np.array([[20, 5], [30, 5], [30, 15], [20, 15]], dtype=np.int32)).apply(s)
-    before = s.label_map.copy()
+    before_map = s.label_map.copy()
+    before_r1_mask = s.region_masks[1].copy()
+    before_r2_mask = s.region_masks[2].copy()
 
     new_verts = np.array([[5, 5], [25, 5], [25, 15], [5, 15]], dtype=np.int32)
     cmd = VertexEditCommand(label_id=1, new_vertices=new_verts)
     cmd.apply(s)
     cmd.undo(s)
 
-    assert np.array_equal(s.label_map, before)
+    assert np.array_equal(s.label_map, before_map)
+    assert np.array_equal(s.region_masks[1], before_r1_mask)
+    assert np.array_equal(s.region_masks[2], before_r2_mask)
 
 
 def test_vertex_edit_rejects_fewer_than_3_vertices():
@@ -223,3 +232,91 @@ def test_vertex_edit_shape_change_no_other_region():
     # Pentagon extends to x=18 now.
     ys, xs = np.where(s.label_map == 1)
     assert int(xs.max()) >= 17
+
+
+# ---- RegionEditCommand -------------------------------------------------------
+
+
+def _make_mask(shape: tuple[int, int], verts: np.ndarray) -> np.ndarray:
+    from bacmask.core import masking
+
+    return masking.rasterize_polygon_mask(verts, shape)
+
+
+def test_region_edit_command_swaps_vertices_and_mask():
+    s = _state()
+    LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)  # region 1
+
+    new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
+    new_mask = _make_mask(s.label_map.shape, new_verts)
+
+    cmd = RegionEditCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd.apply(s)
+
+    assert s.regions[1]["vertices"] == new_verts.tolist()
+    assert np.array_equal(s.region_masks[1], new_mask)
+    assert (s.label_map == 1).any()
+    # Region extends further right now.
+    ys, xs = np.where(s.label_map == 1)
+    assert int(xs.max()) == 25
+    assert s.dirty is True
+
+
+def test_region_edit_command_undo_restores_state():
+    s = _state()
+    LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
+    before_map = s.label_map.copy()
+    before_mask = s.region_masks[1].copy()
+    before_verts = list(s.regions[1]["vertices"])
+
+    new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
+    new_mask = _make_mask(s.label_map.shape, new_verts)
+    cmd = RegionEditCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd.apply(s)
+    cmd.undo(s)
+
+    assert np.array_equal(s.label_map, before_map)
+    assert np.array_equal(s.region_masks[1], before_mask)
+    assert s.regions[1]["vertices"] == before_verts
+
+
+def test_region_edit_command_apply_undo_apply_is_byte_identical():
+    s = _state()
+    LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
+
+    new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
+    new_mask = _make_mask(s.label_map.shape, new_verts)
+    cmd = RegionEditCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd.apply(s)
+    after_map = s.label_map.copy()
+    after_mask = s.region_masks[1].copy()
+    cmd.undo(s)
+    cmd.apply(s)
+
+    assert np.array_equal(s.label_map, after_map)
+    assert np.array_equal(s.region_masks[1], after_mask)
+
+
+def test_region_edit_command_rejects_unknown_label():
+    s = _state()
+    new_verts = np.array([[1, 1], [5, 1], [5, 5]], dtype=np.int32)
+    new_mask = _make_mask(s.label_map.shape, new_verts)
+    with pytest.raises(ValueError):
+        RegionEditCommand(
+            label_id=99,
+            new_vertices=new_verts,
+            new_region_mask=new_mask,
+        ).apply(s)
+
+
+def test_region_edit_command_rejects_shape_mismatch():
+    s = _state()
+    LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
+    new_verts = np.array([[10, 10], [15, 10], [15, 15]], dtype=np.int32)
+    wrong_shape = np.zeros((5, 5), dtype=bool)
+    with pytest.raises(ValueError):
+        RegionEditCommand(
+            label_id=1,
+            new_vertices=new_verts,
+            new_region_mask=wrong_shape,
+        ).apply(s)

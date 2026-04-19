@@ -64,7 +64,12 @@ class DesktopInputAdapter:
             self._last_pan_pos = (touch.x, touch.y)
             return True
         self._drag_mode = "pointer"
-        self._emit(PointerDown(pos=(touch.x, touch.y)))
+        self._emit(
+            PointerDown(
+                pos=(touch.x, touch.y),
+                is_double=bool(getattr(touch, "is_double_tap", False)),
+            )
+        )
         return True
 
     def on_touch_move(self, touch) -> bool:

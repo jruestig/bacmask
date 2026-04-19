@@ -11,7 +11,15 @@ from typing import Any
 
 import cv2
 import numpy as np
-from kivy.graphics import Color, Line, Rectangle
+from kivy.graphics import (
+    Color,
+    Line,
+    Rectangle,
+    StencilPop,
+    StencilPush,
+    StencilUnUse,
+    StencilUse,
+)
 from kivy.graphics.texture import Texture
 from kivy.uix.widget import Widget
 
@@ -88,18 +96,39 @@ class ImageCanvas(Widget):
     def _rebuild_overlay_texture(self) -> None:
         lm = self.service.state.label_map
         regions = self.service.state.regions
+        region_masks = self.service.state.region_masks
         if lm is None or not regions:
             self._overlay_texture = None
             return
         h, w = lm.shape
-        max_id_in_map = int(lm.max())
-        lut_size = max(max_id_in_map, max(regions.keys(), default=0)) + 1
-        lut = np.zeros((lut_size, 4), dtype=np.uint8)
-        alpha = int(255 * OVERLAY_ALPHA)
-        for lid in regions:
+
+        # Alpha-over composite each region's color layer in ascending label order
+        # (oldest first). Overlap pixels blend both colors so the old region stays
+        # visible under the new one. See knowledge/025.
+        acc_rgb = np.zeros((h, w, 3), dtype=np.float32)
+        acc_a = np.zeros((h, w), dtype=np.float32)
+        a_src = float(OVERLAY_ALPHA)
+        one_minus = 1.0 - a_src
+        for lid in sorted(region_masks):
+            if lid not in regions:
+                continue
+            mask = region_masks[lid]
+            if not mask.any():
+                continue
             r, g, b = image_utils.region_color(lid)
-            lut[lid] = (r, g, b, alpha)
-        rgba = lut[lm]
+            src_rgb = np.array([r, g, b], dtype=np.float32) / 255.0
+
+            dst_a = acc_a[mask]
+            out_a = a_src + dst_a * one_minus
+            # out_a is strictly > 0 here since a_src > 0.
+            weight_dst = (dst_a * one_minus / out_a)[:, None]
+            weight_src = (a_src / out_a)[:, None]
+            acc_rgb[mask] = src_rgb[None, :] * weight_src + acc_rgb[mask] * weight_dst
+            acc_a[mask] = out_a
+
+        rgba = np.empty((h, w, 4), dtype=np.uint8)
+        rgba[..., :3] = np.clip(acc_rgb * 255.0, 0, 255).astype(np.uint8)
+        rgba[..., 3] = np.clip(acc_a * 255.0, 0, 255).astype(np.uint8)
 
         tex = Texture.create(size=(w, h), colorfmt="rgba")
         tex.blit_buffer(rgba.tobytes(), colorfmt="rgba", bufferfmt="ubyte")
@@ -127,7 +156,20 @@ class ImageCanvas(Widget):
         # Convert top-down Y to Kivy Y-up for Rectangle pos.
         kivy_pos_y = self.y + (self.height - ty_top - th)
 
+        # Stencil only caps the canvas at its TOP edge — this protects the
+        # toolbar + calibration above from zoomed-image overflow. Horizontal
+        # overflow (into the results panel on the right) and downward overflow
+        # are intentionally allowed, matching the pre-stencil behavior the
+        # user prefers.
+        stencil_margin = max(self.width, self.height) * 10 + 1000
+        stencil_pos = (self.x - stencil_margin, self.y - stencil_margin)
+        stencil_size = (self.width + 2 * stencil_margin, self.height + stencil_margin)
+
         with self.canvas:
+            StencilPush()
+            Rectangle(pos=stencil_pos, size=stencil_size)
+            StencilUse()
+
             Color(1, 1, 1, 1)
             Rectangle(
                 texture=self._image_texture,
@@ -160,6 +202,10 @@ class ImageCanvas(Widget):
                 )
                 Color(*LASSO_PREVIEW_COLOR)
                 Line(points=pts, width=1.2)
+
+            StencilUnUse()
+            Rectangle(pos=stencil_pos, size=stencil_size)
+            StencilPop()
 
     def _image_points_to_widget(
         self,
@@ -206,12 +252,10 @@ class ImageCanvas(Widget):
             xy = self._widget_pos_to_image(event.pos, (img_h, img_w))
             if xy is None:
                 return
-            hit = self._region_at(xy)
-            if hit is not None:
-                self.service.select_region(hit)
-                return
-            self.service.clear_selection()
-            self.service.begin_lasso(xy)
+            if self.service.state.edit_mode:
+                self._on_edit_pointer_down(xy, event.is_double)
+            else:
+                self._on_create_pointer_down(xy)
         elif isinstance(event, PointerMove):
             if self.service.state.active_lasso is None:
                 return
@@ -220,14 +264,64 @@ class ImageCanvas(Widget):
                 return
             self.service.add_lasso_point(xy)
         elif isinstance(event, PointerUp):
-            if self.service.state.active_lasso is not None:
-                self.service.close_lasso()
+            self._on_pointer_up()
         elif isinstance(event, Zoom):
             self._apply_zoom(event.center, event.delta, (img_w, img_h))
         elif isinstance(event, Pan):
             self._apply_pan(event.delta, (img_w, img_h))
         elif isinstance(event, Action):
             self._handle_action(event.name)
+
+    # ---- mode-specific pointer handlers ------------------------------------
+
+    def _on_create_pointer_down(self, xy: tuple[int, int]) -> None:
+        """Non-edit mode: tap on mask selects; tap on bg starts a new-region lasso."""
+        hit = self._region_at(xy)
+        if hit is not None:
+            self.service.select_region(hit)
+            return
+        self.service.clear_selection()
+        self.service.begin_lasso(xy)
+
+    def _on_edit_pointer_down(self, xy: tuple[int, int], is_double: bool) -> None:
+        """Edit mode: double-tap retargets; single press-drag strokes on the current target.
+
+        Single-tap behavior (per knowledge/023):
+        - No target yet + hit a region → set target, no stroke.
+        - Target set → begin accumulating a stroke (press-drag ahead).
+        - No target yet + tap on bg → no-op.
+        """
+        svc = self.service
+        if is_double:
+            hit = self._region_at(xy)
+            if hit is not None:
+                svc.select_region(hit)
+            else:
+                svc.clear_selection()
+            return
+        if svc.state.selected_region_id is None:
+            hit = self._region_at(xy)
+            if hit is not None:
+                svc.select_region(hit)
+            return
+        svc.begin_lasso(xy)
+
+    def _on_pointer_up(self) -> None:
+        svc = self.service
+        if svc.state.active_lasso is None:
+            return
+        if svc.state.edit_mode:
+            target = svc.state.selected_region_id
+            samples = svc.state.active_lasso
+            samples_list = [(int(p[0]), int(p[1])) for p in samples]
+            svc.cancel_lasso()
+            if target is not None and len(samples_list) >= 2:
+                try:
+                    svc.edit_region_stroke(target, samples_list)
+                except KeyError:
+                    pass
+            return
+        svc.close_lasso()
 
     # ---- view transform -----------------------------------------------------
 

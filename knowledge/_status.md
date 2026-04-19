@@ -1,12 +1,12 @@
-# Status — 2026-04-19
+# Status — 2026-04-19 (session 3 update)
 
 Session-handoff doc. Updated at the end of each working session. What follows `knowledge/` conventions — kept short on purpose.
 
 ## Currently working on
-- Nothing in flight at end of session. Next session picks up the core data-model refactor — see "Next actions."
+- Nothing in flight at end of session. First live UI smoke pass done — a few small fit-and-finish items found and fixed below.
 
 ## In progress (started, not done)
-- Landing the overlap-aware data model. Spec is finalized across knowledge notes (002, 015, 023, 024, 025); code still reflects the old disjoint + in-bundle-mask model. The big refactor (bundle v2 + polygons-canonical state + RegionEditCommand) is next session — it interlocks too much to parallelize safely.
+- Nothing half-done.
 
 ## Blocked (waiting on external input or deferred decisions)
 - **Mask export output location + CLI.** User wants to pick `out_dir` and a CLI wrapper "later." Format contract is locked ([024](024-mask-export-deferred.md)); placement and ergonomics deferred.
@@ -14,32 +14,26 @@ Session-handoff doc. Updated at the end of each working session. What follows `k
 - **macOS validation.** Not an MVP target, intentionally deferred ([020](020-platform-scope.md)).
 
 ## Next actions (concrete, ordered)
-1. **Bundle v2 read/write in `core/io_manager.py`.**
-   - Stop writing `mask.png` on save; drop it from the zip.
-   - Write `meta.json` with `bacmask_version: 2` + `image_shape`.
-   - v1 reader back-compat: accept bundles that contain `mask.png`, ignore the raster, trust the polygons. Auto-promote on re-save.
-2. **State refactor in `core/state.py` + `services/mask_service.py`.**
-   - Make `regions` (polygons) the single source of truth.
-   - Introduce `region_masks: dict[int, np.ndarray]` (per-region `bool`) and `label_map_cache` (display-only `uint16`), both derived on polygon mutation.
-   - Rebuild both on `load_bundle`; patch within bbox on commands.
-3. **UI: split Save and Export.**
-   - `Save` → bundle only.
-   - `Export` → CSV only. Add a separate toolbar button. Remove the CSV write from the Save path.
-4. **Edit mode toggle in the toolbar + keyboard (`e`).**
-   - Session-local `edit_mode: bool` on `SessionState`.
-   - Gate the canvas' press-drag behavior on it.
-5. **`RegionEditCommand` + add/subtract stroke implementation.**
-   - Rename `VertexEditCommand` → `RegionEditCommand(label_id, old_vertices, new_vertices, old_mask_patch)`.
-   - Port the algorithm from [023](023-edit-mode-region-boolean-edits.md): first-two-crossings, close-straight, apply, largest-CC with smallest-`(y, x)` tiebreak, re-derive vertices via `cv2.findContours`.
-   - Subtract-empties-target → route to `DeleteRegionCommand`.
-6. **Canvas double-click retargeting in edit mode.**
-   - Single tap sets first target; double-tap retargets; background double-tap clears.
-7. **Zoom/pan transform in `ImageCanvas`.**
-   - Consume `Zoom`/`Pan` input events already emitted by `DesktopInputAdapter`; update `image_to_display` / `display_to_image` to account for a view transform.
-8. **Zero-enclosed-area warning on lasso close.**
-   - Already discarded silently with <3 points; add a warning popup or log line for non-trivial zero-area strokes.
+1. **More live-UI passes.** Keep exercising real images. Known polish candidates:
+   - Distinct color/style for the edit-stroke preview (green for add, red for subtract) once mode can be inferred client-side.
+   - Click feedback or row highlight when selecting via canvas tap.
+2. **Windows smoke test.** Needs a Windows box.
+3. **Mask export** (`bacmask/services/mask_export.py`). Headless `export_masks(bundle_path, out_dir)` per [024](024-mask-export-deferred.md). Not UI-wired. Deferred until someone has a concrete training pipeline to consume the layered `.npy` output.
+4. **CLI wrapper for mask export** + user-chosen `out_dir`. After item 3.
+5. **Region rename.** Users can't change `region_01` / `region_02` names today. Add an inline edit in the results panel. Post-MVP.
+6. **Numeric input polish** — calibration field accepts units other than mm/px? Not in spec, ignore for now.
 
-## Recently completed (last ~2 sessions)
+## Recently completed (last ~3 sessions)
+- **Live UI polish (session 3).**
+  - **Zoomed image no longer covers toolbar/calibration.** Added a Kivy stencil in `ImageCanvas._repaint`. Rectangle extends very far in x (both sides) and downward, but caps at `self.top` — toolbar + calibration above stay visible; image can still bleed horizontally into the results panel on the right and downward (matching pre-stencil behavior the user prefers).
+  - **Results panel stays on the right.** Brief detour moving it above the canvas; reverted. Layout is unchanged from pre-session: toolbar → calibration → body (canvas left, results 30% right).
+  - **Overlay alpha-over compositing for overlapping regions.** `_rebuild_overlay_texture` now iterates `region_masks` in ascending label order and alpha-blends each region's color on top of the running accumulator (straight-alpha Porter-Duff "over"). Non-overlapping pixels render identical to before (single color at 0.45 alpha). Overlap pixels mix: newer region weighted heavier, older region's color still visible underneath — supports knowledge/025's "you should be able to see both regions" user expectation.
+- **Core data-model refactor (session 2).**
+  - **State.** Added `region_masks: dict[int, np.ndarray]` (bool per region) to `SessionState`. Polygons in `regions` are canonical; `label_map` is now a derived display cache painted in ascending `label_id` order so newest-on-top wins overlap. `masking.py` gained `rasterize_polygon_mask` + `repaint_label_map`. All commands (LassoClose, Delete, VertexEdit) maintain both stores; `compute_area_rows` counts `region_masks[id]` (overlap-inclusive). `load_bundle` rasterizes polygons to populate both. (`knowledge/002`, `knowledge/025`)
+  - **Bundle v2 format** (agent). `.bacmask` now contains `image.<ext>` + `meta.json` only; no `mask.png`. `meta.json` has `bacmask_version: 2` + `image_shape`. v1 bundles still loadable — `mask.png` is ignored. Re-saving promotes to v2 automatically. Dropped `save_mask_png` / `load_mask_png` / `load_mask_for_image` / `MaskDimensionMismatch`. (`knowledge/015`)
+  - **RegionEditCommand + add/subtract stroke algorithm** (agent). Implements `knowledge/023` fully: first-two-boundary-crossings truncation, straight-line close of the truncated segment, `target ∪ S` / `target \ S`, largest-CC filter with smallest-`(y, x)` tiebreak, re-derive vertices via `cv2.findContours`. `masking.py` gained `find_boundary_crossings`, `rasterize_stroke_polygon`, `largest_connected_component`, `contour_vertices`. `MaskService.edit_region_stroke(target_id, samples)` returns `"added"` / `"subtracted"` / `"deleted"` / `None`; subtract-empties-region routes through `DeleteRegionCommand`. No neighbor clipping — overlap is preserved per `knowledge/025`.
+  - **Canvas edit-mode wiring.** `ImageCanvas._on_input` branches on `state.edit_mode`. Create mode: existing tap-selects / drag-starts-lasso. Edit mode: double-tap retargets (or clears on bg); single tap when no target sets first target; press-drag with target accumulates samples via the existing `active_lasso` buffer and dispatches `edit_region_stroke` + `cancel_lasso` on release. `PointerDown` gained `is_double: bool`; `DesktopInputAdapter` forwards `touch.is_double_tap`.
+  - **Suite.** 137 → 172 passing. New tests: 13 masking helpers, 5 RegionEditCommand, 9 service edit-stroke, 8 canvas edit routing. Ruff + format clean.
 - **Save/Export UI split.** `Save` writes only the bundle; new `Export CSV` button writes only the areas CSV. Service exposes `save_bundle` + `export_csv` (replacing `save_all`). `Ctrl+E` binds export, `Ctrl+S` still saves. Bundle internals unchanged (still v1 with `mask.png`); format refactor is next session.
 - **Edit mode toggle scaffolding.** `edit_mode: bool` on `SessionState` (session-local, not persisted). `ToggleButton` in toolbar reflects + drives the flag via `MaskService.set_edit_mode` / `toggle_edit_mode`. Bare `e` hotkey bound to `toggle_edit_mode` action in `app.py`. In-progress lasso is canceled on any mode flip so users can't commit a cross-mode stroke. No add/subtract behavior wired yet.
 - **Zero-area lasso guard.** `masking.polygon_area` (wraps `cv2.contourArea`) exposes the mathematical enclosed area. `mask_service.close_lasso` discards polygons with `area <= 0` and logs a WARNING. Catches collinear / duplicate-point / sub-3-vertex cases deterministically — `cv2.fillPoly` fills boundary pixels for degenerate polygons, so the rasterization count is misleading; shoelace area is the right primitive.

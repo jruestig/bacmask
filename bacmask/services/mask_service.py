@@ -69,11 +69,21 @@ class MaskService:
         with zipfile.ZipFile(p, "r") as zf:
             self.state.image_bytes = zf.read(f"image{bundle.image_ext}")
         self.state.image_ext = bundle.image_ext
-        self.state.label_map = bundle.label_map
+        h, w = bundle.image.shape[:2]
         self.state.regions = {int(k): v for k, v in bundle.meta.regions.items()}
+        # Polygons are canonical — rasterize each into a per-region bool mask
+        # and paint the display cache from them. The mask inside the bundle (if
+        # any, for v1 bundles) is ignored. See knowledge/015, 025.
+        self.state.region_masks = {
+            label_id: masking.rasterize_polygon_mask(meta["vertices"], (h, w))
+            for label_id, meta in self.state.regions.items()
+        }
+        self.state.label_map = np.zeros((h, w), dtype=np.uint16)
+        masking.repaint_label_map(self.state.label_map, self.state.region_masks)
         self.state.next_label_id = bundle.meta.next_label_id
         self.state.scale_mm_per_px = bundle.meta.scale_mm_per_px
         self.state.active_lasso = None
+        self.state.selected_region_id = None
         self.state.dirty = False
         self.history.clear()
         self._active_lasso = []
@@ -132,6 +142,105 @@ class MaskService:
         cmd = VertexEditCommand(label_id=label_id, new_vertices=verts)
         self.history.push(cmd, self.state)
         self._notify()
+
+    # ---- region edit stroke (add / subtract) --------------------------------
+
+    def edit_region_stroke(
+        self,
+        target_id: int,
+        samples: Sequence[tuple[int, int]] | np.ndarray,
+    ) -> str | None:
+        """Apply an add/subtract stroke to ``target_id``.
+
+        Implements the algorithm in knowledge/023: detect add vs. subtract
+        from the press-down sample, find the first two boundary crossings,
+        truncate + close the open polyline, rasterize into a mask ``S``, then
+        ``target | S`` (add) or ``target & ~S`` (subtract). Multi-piece
+        results are filtered to the largest connected component (deterministic
+        tiebreak on smallest ``(y, x)`` pixel). Empty result routes through
+        :class:`DeleteRegionCommand` so the region is removed cleanly.
+
+        Returns one of:
+
+        * ``"added"`` — an add stroke was committed.
+        * ``"subtracted"`` — a subtract stroke was committed.
+        * ``"deleted"`` — the subtract emptied the region; delete was applied.
+        * ``None`` — the stroke was discarded silently.
+        """
+        # Local imports — the top-of-file import block is reserved for another
+        # concurrent refactor (knowledge/023 integration note).
+        from bacmask.core.commands import DeleteRegionCommand, RegionEditCommand
+
+        if target_id not in self.state.regions:
+            raise KeyError(f"region {target_id} does not exist")
+        if self.state.label_map is None:
+            raise ValueError("state.label_map is not initialized")
+
+        pts = np.asarray(samples, dtype=np.int32).reshape(-1, 2)
+        if len(pts) < 3:
+            return None
+
+        image_shape = self.state.label_map.shape
+        h, w = image_shape
+        target_mask = self.state.region_masks.get(target_id)
+        if target_mask is None:
+            target_mask = np.zeros(image_shape, dtype=bool)
+
+        # Mode from the press-down sample. Out-of-bounds => outside.
+        x0, y0 = int(pts[0, 0]), int(pts[0, 1])
+        if 0 <= x0 < w and 0 <= y0 < h and bool(target_mask[y0, x0]):
+            mode = "add"
+        else:
+            mode = "subtract"
+
+        p, q = masking.find_boundary_crossings(pts, target_mask)
+        if p is None or q is None:
+            return None
+
+        # Samples[P+1 : Q+1] — from the first sample on the other side through
+        # the first sample back on the origin side (inclusive).
+        segment = pts[p + 1 : q + 1]
+        if len(segment) < 3:
+            return None
+
+        s_mask = masking.rasterize_stroke_polygon(segment, image_shape)
+        if not s_mask.any():
+            return None
+
+        if mode == "add":
+            new_mask = target_mask | s_mask
+        else:
+            new_mask = target_mask & ~s_mask
+
+        # Bitwise no-op => discard.
+        if np.array_equal(new_mask, target_mask):
+            return None
+
+        # Empty result => route through DeleteRegionCommand so the existing
+        # undo path + monotonic-id behavior apply uniformly.
+        if not new_mask.any():
+            cmd = DeleteRegionCommand(label_id=target_id)
+            self.history.push(cmd, self.state)
+            if self.state.selected_region_id == target_id:
+                self.state.selected_region_id = None
+            self._notify()
+            return "deleted"
+
+        # Keep the largest connected component (deterministic tiebreak).
+        filtered = masking.largest_connected_component(new_mask)
+        new_vertices = masking.contour_vertices(filtered)
+        if len(new_vertices) < 3:
+            # Contour too small to form a polygon — discard silently.
+            return None
+
+        edit_cmd = RegionEditCommand(
+            label_id=target_id,
+            new_vertices=new_vertices,
+            new_region_mask=filtered,
+        )
+        self.history.push(edit_cmd, self.state)
+        self._notify()
+        return "added" if mode == "add" else "subtracted"
 
     # ---- delete -------------------------------------------------------------
 
@@ -203,13 +312,16 @@ class MaskService:
     # ---- derived ------------------------------------------------------------
 
     def compute_area_rows(self) -> list[io_manager.AreaRow]:
-        if self.state.label_map is None or self.state.image_filename is None:
+        """Per-region area rows. Counts each region's own pixels (region_masks),
+        so overlapping pixels are counted once per region (knowledge/025).
+        """
+        if self.state.image_filename is None or not self.state.regions:
             return []
-        counts = area.count_pixels_per_region(self.state.label_map)
         scale = self.state.scale_mm_per_px
         rows: list[io_manager.AreaRow] = []
         for label_id, meta in sorted(self.state.regions.items()):
-            px = counts.get(label_id, 0)
+            region_mask = self.state.region_masks.get(label_id)
+            px = int(region_mask.sum()) if region_mask is not None else 0
             rows.append(
                 io_manager.AreaRow(
                     filename=self.state.image_filename,
@@ -227,13 +339,15 @@ class MaskService:
     def save_bundle(self, bundle_path: Path | str) -> None:
         """Write the ``.bacmask`` bundle only. No CSV; no mask sidecar."""
         if (
-            self.state.label_map is None
+            self.state.image is None
             or self.state.image_bytes is None
             or self.state.image_ext is None
         ):
             raise ValueError("no image loaded")
+        image_shape = (int(self.state.image.shape[0]), int(self.state.image.shape[1]))
         meta = io_manager.BundleMeta(
             source_filename=self.state.image_filename or "unknown",
+            image_shape=image_shape,
             scale_mm_per_px=self.state.scale_mm_per_px,
             next_label_id=self.state.next_label_id,
             regions=dict(self.state.regions),
@@ -242,7 +356,7 @@ class MaskService:
             bundle_path,
             image_bytes=self.state.image_bytes,
             image_ext=self.state.image_ext,
-            label_map=self.state.label_map,
+            image_shape=image_shape,
             meta=meta,
         )
         self.state.dirty = False

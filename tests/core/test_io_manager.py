@@ -16,11 +16,17 @@ def _write_synthetic_image(tmp_path: Path, name: str = "img.png") -> Path:
     return p
 
 
-def _sample_label_map() -> np.ndarray:
-    m = np.zeros((20, 30), dtype=np.uint16)
-    m[5:10, 5:10] = 1
-    m[12:18, 15:25] = 2
-    return m
+def _sample_regions() -> dict[int, dict]:
+    return {
+        1: {
+            "name": "region_01",
+            "vertices": [[5, 5], [10, 5], [10, 10], [5, 10]],
+        },
+        2: {
+            "name": "region_02",
+            "vertices": [[15, 12], [25, 12], [25, 18], [15, 18]],
+        },
+    }
 
 
 # --- image load ---------------------------------------------------------------
@@ -36,63 +42,6 @@ def test_load_image_returns_numpy_array(tmp_path):
 def test_load_image_missing_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         iom.load_image(tmp_path / "nope.png")
-
-
-# --- mask PNG round-trip ------------------------------------------------------
-
-
-def test_mask_png_round_trip_is_bit_identical(tmp_path):
-    m = _sample_label_map()
-    p = tmp_path / "mask.png"
-    iom.save_mask_png(p, m)
-    loaded = iom.load_mask_png(p)
-    assert loaded.dtype == np.uint16
-    assert np.array_equal(loaded, m)
-
-
-def test_mask_png_preserves_16bit_values(tmp_path):
-    """Large label IDs must survive without 8-bit downcast."""
-    m = np.zeros((5, 5), dtype=np.uint16)
-    m[1, 1] = 12_345  # > 255
-    m[3, 3] = 65_000  # near uint16 max
-    p = tmp_path / "m.png"
-    iom.save_mask_png(p, m)
-    loaded = iom.load_mask_png(p)
-    assert loaded[1, 1] == 12_345
-    assert loaded[3, 3] == 65_000
-
-
-def test_save_mask_rejects_non_uint16(tmp_path):
-    with pytest.raises(TypeError):
-        iom.save_mask_png(tmp_path / "m.png", np.zeros((5, 5), dtype=np.uint8))
-
-
-def test_save_mask_rejects_non_2d(tmp_path):
-    with pytest.raises(ValueError):
-        iom.save_mask_png(tmp_path / "m.png", np.zeros((5, 5, 3), dtype=np.uint16))
-
-
-def test_load_mask_missing_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        iom.load_mask_png(tmp_path / "nope.png")
-
-
-def test_load_mask_for_image_rejects_mismatch(tmp_path):
-    m = _sample_label_map()
-    p = tmp_path / "mask.png"
-    iom.save_mask_png(p, m)
-    with pytest.raises(iom.MaskDimensionMismatch) as exc_info:
-        iom.load_mask_for_image(p, image_shape=(10, 10))
-    assert exc_info.value.mask_shape == (20, 30)
-    assert exc_info.value.image_shape == (10, 10)
-
-
-def test_load_mask_for_image_accepts_match(tmp_path):
-    m = _sample_label_map()
-    p = tmp_path / "mask.png"
-    iom.save_mask_png(p, m)
-    loaded = iom.load_mask_for_image(p, image_shape=(20, 30))
-    assert np.array_equal(loaded, m)
 
 
 # --- CSV ----------------------------------------------------------------------
@@ -126,36 +75,27 @@ def test_csv_overwrites_on_resave(tmp_path):
     assert lines[1].split(",")[3] == "7"
 
 
-# --- Bundle round-trip --------------------------------------------------------
+# --- Bundle v2 round-trip -----------------------------------------------------
 
 
-def test_bundle_round_trip(tmp_path):
+def test_bundle_v2_round_trip(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
-    m = _sample_label_map()
+    regions = _sample_regions()
     meta = iom.BundleMeta(
         source_filename=img_path.name,
+        image_shape=(20, 30),
         scale_mm_per_px=0.0125,
         next_label_id=3,
-        regions={
-            1: {
-                "name": "region_01",
-                "vertices": [[5, 5], [10, 5], [10, 10], [5, 10]],
-            },
-            2: {
-                "name": "region_02",
-                "vertices": [[15, 12], [25, 12], [25, 18], [15, 18]],
-            },
-        },
+        regions=regions,
     )
     bundle_path = tmp_path / "x.bacmask"
-    iom.save_bundle(bundle_path, img_path, m, meta)
+    iom.save_bundle(bundle_path, img_path, (20, 30), meta)
 
     loaded = iom.load_bundle(bundle_path)
-    assert np.array_equal(loaded.label_map, m)
-    assert loaded.label_map.dtype == np.uint16
     assert loaded.image.shape == (20, 30)
     assert loaded.image_ext == ".png"
     assert loaded.meta.source_filename == img_path.name
+    assert loaded.meta.image_shape == (20, 30)
     assert loaded.meta.scale_mm_per_px == 0.0125
     assert loaded.meta.next_label_id == 3
     assert loaded.meta.regions[1]["name"] == "region_01"
@@ -167,12 +107,33 @@ def test_bundle_round_trip(tmp_path):
     ]
 
 
+def test_bundle_v2_does_not_write_mask_png(tmp_path):
+    img_path = _write_synthetic_image(tmp_path)
+    meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
+    p = tmp_path / "x.bacmask"
+    iom.save_bundle(p, img_path, (20, 30), meta)
+    with zipfile.ZipFile(p, "r") as zf:
+        names = set(zf.namelist())
+    assert "mask.png" not in names
+    assert names == {"image.png", "meta.json"}
+
+
+def test_bundle_v2_meta_contains_version_and_image_shape(tmp_path):
+    img_path = _write_synthetic_image(tmp_path)
+    meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
+    p = tmp_path / "x.bacmask"
+    iom.save_bundle(p, img_path, (20, 30), meta)
+    with zipfile.ZipFile(p, "r") as zf:
+        meta_json = json.loads(zf.read("meta.json"))
+    assert meta_json["bacmask_version"] == 2
+    assert meta_json["image_shape"] == [20, 30]
+
+
 def test_bundle_uncalibrated_preserves_null_scale(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
-    m = _sample_label_map()
-    meta = iom.BundleMeta(img_path.name, None, 1, {})
+    meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
     p = tmp_path / "u.bacmask"
-    iom.save_bundle(p, img_path, m, meta)
+    iom.save_bundle(p, img_path, (20, 30), meta)
     loaded = iom.load_bundle(p)
     assert loaded.meta.scale_mm_per_px is None
 
@@ -180,19 +141,38 @@ def test_bundle_uncalibrated_preserves_null_scale(tmp_path):
 def test_bundle_preserves_source_bytes_exactly(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
     original_bytes = img_path.read_bytes()
-    m = _sample_label_map()
-    meta = iom.BundleMeta(img_path.name, None, 1, {})
+    meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
     p = tmp_path / "b.bacmask"
-    iom.save_bundle(p, img_path, m, meta)
+    iom.save_bundle(p, img_path, (20, 30), meta)
     with zipfile.ZipFile(p, "r") as zf:
         assert zf.read("image.png") == original_bytes
+
+
+def test_bundle_meta_json_is_deterministic(tmp_path):
+    """Keys sorted, indent=2. Save twice with identical meta (same created_at,
+    different updated_at) and verify structural keys are stable & sorted."""
+    img_path = _write_synthetic_image(tmp_path)
+    meta = iom.BundleMeta(
+        source_filename=img_path.name,
+        image_shape=(20, 30),
+        scale_mm_per_px=None,
+        next_label_id=1,
+        regions={},
+        created_at="2026-04-18T00:00:00Z",
+    )
+    p = tmp_path / "d.bacmask"
+    iom.save_bundle(p, img_path, (20, 30), meta)
+    with zipfile.ZipFile(p, "r") as zf:
+        text = zf.read("meta.json").decode()
+    # sort_keys=True: the top-level keys appear in alphabetical order.
+    parsed_keys = list(json.loads(text).keys())
+    assert parsed_keys == sorted(parsed_keys)
 
 
 def test_bundle_unknown_version_raises(tmp_path):
     p = tmp_path / "bad.bacmask"
     with zipfile.ZipFile(p, "w") as zf:
         zf.writestr("image.png", b"dummy")
-        zf.writestr("mask.png", b"dummy")
         zf.writestr(
             "meta.json",
             json.dumps(
@@ -219,6 +199,7 @@ def test_bundle_missing_member_raises(tmp_path):
                 {
                     "bacmask_version": iom.BACMASK_VERSION,
                     "source_filename": "x",
+                    "image_shape": [20, 30],
                     "next_label_id": 1,
                     "regions": {},
                     "scale_mm_per_px": None,
@@ -227,3 +208,99 @@ def test_bundle_missing_member_raises(tmp_path):
         )
     with pytest.raises(ValueError):
         iom.load_bundle(p)
+
+
+# --- v1 back-compat -----------------------------------------------------------
+
+
+def _build_v1_bundle(
+    tmp_path: Path,
+    *,
+    img_bytes: bytes,
+    regions: dict[int, dict],
+    scale: float | None = 0.01,
+    next_label_id: int = 3,
+    include_mask_png: bool = True,
+) -> Path:
+    """Hand-craft a v1 bundle directly via zipfile for back-compat tests."""
+    p = tmp_path / "v1.bacmask"
+    v1_meta = {
+        "bacmask_version": 1,
+        "source_filename": "legacy.png",
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-01T00:00:00Z",
+        "scale_mm_per_px": scale,
+        "next_label_id": next_label_id,
+        "regions": {str(k): v for k, v in regions.items()},
+    }
+    with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("image.png", img_bytes)
+        if include_mask_png:
+            # A dummy (but valid) 16-bit PNG — its contents are intentionally
+            # bogus; loader should ignore it entirely.
+            dummy_labels = np.zeros((20, 30), dtype=np.uint16)
+            dummy_labels[0, 0] = 42  # wrong — shouldn't ever surface to caller
+            ok, buf = cv2.imencode(".png", dummy_labels)
+            assert ok
+            zf.writestr("mask.png", buf.tobytes())
+        zf.writestr("meta.json", json.dumps(v1_meta, indent=2, sort_keys=True))
+    return p
+
+
+def test_load_v1_bundle_ignores_mask_png_and_derives_image_shape(tmp_path):
+    img_path = _write_synthetic_image(tmp_path)
+    img_bytes = img_path.read_bytes()
+    regions = _sample_regions()
+    p = _build_v1_bundle(tmp_path, img_bytes=img_bytes, regions=regions)
+
+    loaded = iom.load_bundle(p)
+    assert loaded.image.shape == (20, 30)
+    # image_shape not in v1 meta -> derived from decoded image.
+    assert loaded.meta.image_shape == (20, 30)
+    assert loaded.meta.source_filename == "legacy.png"
+    assert loaded.meta.next_label_id == 3
+    assert loaded.meta.scale_mm_per_px == 0.01
+    assert loaded.meta.regions[1]["vertices"] == regions[1]["vertices"]
+    assert loaded.meta.regions[2]["vertices"] == regions[2]["vertices"]
+
+
+def test_load_v1_bundle_without_mask_png_still_loads(tmp_path):
+    """v1 without mask.png is tolerable too — we ignore mask.png regardless."""
+    img_path = _write_synthetic_image(tmp_path)
+    p = _build_v1_bundle(
+        tmp_path,
+        img_bytes=img_path.read_bytes(),
+        regions=_sample_regions(),
+        include_mask_png=False,
+    )
+    loaded = iom.load_bundle(p)
+    assert 1 in loaded.meta.regions
+    assert 2 in loaded.meta.regions
+
+
+def test_resaving_v1_bundle_promotes_to_v2(tmp_path):
+    img_path = _write_synthetic_image(tmp_path)
+    v1_path = _build_v1_bundle(
+        tmp_path,
+        img_bytes=img_path.read_bytes(),
+        regions=_sample_regions(),
+    )
+
+    loaded = iom.load_bundle(v1_path)
+    # Write it back out using the normal v2 writer.
+    v2_path = tmp_path / "promoted.bacmask"
+    iom.save_bundle_from_bytes(
+        v2_path,
+        image_bytes=img_path.read_bytes(),
+        image_ext=".png",
+        image_shape=loaded.meta.image_shape,
+        meta=loaded.meta,
+    )
+
+    with zipfile.ZipFile(v2_path, "r") as zf:
+        names = set(zf.namelist())
+        meta_json = json.loads(zf.read("meta.json"))
+    assert "mask.png" not in names
+    assert names == {"image.png", "meta.json"}
+    assert meta_json["bacmask_version"] == 2
+    assert meta_json["image_shape"] == [20, 30]

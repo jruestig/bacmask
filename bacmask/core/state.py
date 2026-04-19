@@ -16,8 +16,14 @@ class SessionState:
     image_filename: str | None = None
     image_bytes: bytes | None = None
     image_ext: str | None = None
+    # Display cache, painted from region_masks in ascending label order so the
+    # highest label wins on overlapping pixels. See knowledge/002, 025.
     label_map: np.ndarray | None = None
+    # Canonical region storage: {label_id: {"name": str, "vertices": list[[x, y]]}}.
     regions: dict[int, dict[str, Any]] = field(default_factory=dict)
+    # Derived per-region bool masks, kept in sync by commands. Authoritative for
+    # area and hit-testing against the target region (knowledge/025).
+    region_masks: dict[int, np.ndarray] = field(default_factory=dict)
     next_label_id: int = 1
     scale_mm_per_px: float | None = None
     active_lasso: np.ndarray | None = None
@@ -34,6 +40,7 @@ class SessionState:
         h, w = image.shape[:2]
         self.label_map = np.zeros((h, w), dtype=np.uint16)
         self.regions = {}
+        self.region_masks = {}
         self.next_label_id = 1
         self.active_lasso = None
         self.selected_region_id = None

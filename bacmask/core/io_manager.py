@@ -1,6 +1,7 @@
-"""I/O for images, mask PNGs, .bacmask bundles, and sibling CSV.
+"""I/O for images, .bacmask bundles, and sibling CSV.
 
-See knowledge/011 (CSV), 012 (PNG), 015 (bundle), 018 (dim mismatch).
+See knowledge/011 (CSV), 015 (bundle), 024 (mask export deferred),
+025 (polygons canonical).
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ from typing import Any
 import cv2
 import numpy as np
 
-BACMASK_VERSION = 1
+BACMASK_VERSION = 2
+BACMASK_VERSION_V1 = 1
 
 CSV_HEADER = [
     "filename",
@@ -26,13 +28,6 @@ CSV_HEADER = [
     "area_mm2",
     "scale_factor",
 ]
-
-
-class MaskDimensionMismatch(Exception):
-    def __init__(self, mask_shape: tuple[int, ...], image_shape: tuple[int, ...]) -> None:
-        super().__init__(f"mask shape {mask_shape} does not match image shape {image_shape}")
-        self.mask_shape = mask_shape
-        self.image_shape = image_shape
 
 
 class UnsupportedBundleVersion(Exception):
@@ -56,46 +51,6 @@ def load_image(path: Path | str) -> np.ndarray:
     if img is None:
         raise ValueError(f"could not decode image: {p}")
     return img
-
-
-# ---- mask PNG I/O ------------------------------------------------------------
-
-
-def save_mask_png(path: Path | str, label_map: np.ndarray) -> None:
-    if label_map.dtype != np.uint16:
-        raise TypeError(f"label_map must be uint16, got {label_map.dtype}")
-    if label_map.ndim != 2:
-        raise ValueError(f"label_map must be 2-D, got shape {label_map.shape}")
-    ok = cv2.imwrite(str(path), label_map)
-    if not ok:
-        raise OSError(f"failed to write mask PNG to {path}")
-
-
-def load_mask_png(path: Path | str) -> np.ndarray:
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(p)
-    arr = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
-    if arr is None:
-        raise ValueError(f"could not decode mask PNG: {p}")
-    if arr.dtype != np.uint16:
-        raise ValueError(f"mask PNG is not 16-bit grayscale (got {arr.dtype})")
-    if arr.ndim != 2:
-        raise ValueError(f"mask PNG must be 2-D, got shape {arr.shape}")
-    return arr
-
-
-def load_mask_for_image(mask_path: Path | str, image_shape: tuple[int, int]) -> np.ndarray:
-    """Load a mask and validate it matches ``image_shape``.
-
-    Raises :class:`MaskDimensionMismatch` when shapes differ. Callers in the
-    service layer decide whether to prompt + resize (non-default) or reject
-    (default). See knowledge/018.
-    """
-    arr = load_mask_png(mask_path)
-    if arr.shape != image_shape:
-        raise MaskDimensionMismatch(arr.shape, image_shape)
-    return arr
 
 
 # ---- CSV ---------------------------------------------------------------------
@@ -134,6 +89,7 @@ def save_areas_csv(path: Path | str, rows: list[AreaRow]) -> None:
 @dataclass
 class BundleMeta:
     source_filename: str
+    image_shape: tuple[int, int]
     scale_mm_per_px: float | None
     next_label_id: int
     regions: dict[int, dict[str, Any]]
@@ -145,7 +101,6 @@ class BundleMeta:
 class BundleContents:
     image: np.ndarray
     image_ext: str  # ".tif", ".png", ... (with leading dot)
-    label_map: np.ndarray
     meta: BundleMeta
 
 
@@ -154,21 +109,26 @@ def save_bundle_from_bytes(
     *,
     image_bytes: bytes,
     image_ext: str,
-    label_map: np.ndarray,
+    image_shape: tuple[int, int],
     meta: BundleMeta,
 ) -> None:
-    """Write a .bacmask ZIP given raw source-image bytes and extension."""
-    if label_map.dtype != np.uint16:
-        raise TypeError(f"label_map must be uint16, got {label_map.dtype}")
+    """Write a v2 .bacmask ZIP given raw source-image bytes and extension.
 
+    v2 bundles contain only ``image.<ext>`` and ``meta.json``. Raster masks
+    are not stored; polygons in ``meta.regions`` are canonical (knowledge/015,
+    knowledge/025). Raster export is a separate, deferred operation
+    (knowledge/024).
+    """
     ext = image_ext.lower() if image_ext else ".bin"
     if not ext.startswith("."):
         ext = "." + ext
 
+    h, w = image_shape
     now_iso = _utcnow_iso()
     meta_json = {
         "bacmask_version": BACMASK_VERSION,
         "source_filename": meta.source_filename,
+        "image_shape": [int(h), int(w)],
         "created_at": meta.created_at or now_iso,
         "updated_at": now_iso,
         "scale_mm_per_px": meta.scale_mm_per_px,
@@ -178,20 +138,15 @@ def save_bundle_from_bytes(
         },
     }
 
-    ok, mask_buf = cv2.imencode(".png", label_map)
-    if not ok:
-        raise OSError("failed to encode mask PNG")
-
     with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"image{ext}", image_bytes)
-        zf.writestr("mask.png", mask_buf.tobytes())
         zf.writestr("meta.json", json.dumps(meta_json, indent=2, sort_keys=True))
 
 
 def save_bundle(
     bundle_path: Path | str,
     source_image_path: Path | str,
-    label_map: np.ndarray,
+    image_shape: tuple[int, int],
     meta: BundleMeta,
 ) -> None:
     """Convenience wrapper: read source bytes from disk, delegate to save_bundle_from_bytes."""
@@ -202,12 +157,18 @@ def save_bundle(
         bundle_path,
         image_bytes=src.read_bytes(),
         image_ext=src.suffix.lower() or ".bin",
-        label_map=label_map,
+        image_shape=image_shape,
         meta=meta,
     )
 
 
 def load_bundle(bundle_path: Path | str) -> BundleContents:
+    """Load a .bacmask bundle. Accepts both v1 and v2.
+
+    v1 bundles: ignore ``mask.png`` (polygons are authoritative), derive
+    ``image_shape`` from the decoded image. v2 bundles: ``image_shape`` is
+    read from ``meta.json`` directly.
+    """
     p = Path(bundle_path)
     if not p.exists():
         raise FileNotFoundError(p)
@@ -217,32 +178,31 @@ def load_bundle(bundle_path: Path | str) -> BundleContents:
         image_name = next((n for n in names if n.startswith("image.")), None)
         if image_name is None:
             raise ValueError(f"bundle missing image.*: {p}")
-        if "mask.png" not in names:
-            raise ValueError(f"bundle missing mask.png: {p}")
         if "meta.json" not in names:
             raise ValueError(f"bundle missing meta.json: {p}")
 
         image_bytes = zf.read(image_name)
-        mask_bytes = zf.read("mask.png")
         meta_bytes = zf.read("meta.json")
 
     meta_json = json.loads(meta_bytes)
     version = meta_json.get("bacmask_version")
-    if version != BACMASK_VERSION:
+    if version not in (BACMASK_VERSION_V1, BACMASK_VERSION):
         raise UnsupportedBundleVersion(version)
 
     image_arr = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
     if image_arr is None:
         raise ValueError(f"bundle image could not be decoded: {image_name}")
 
-    mask_arr = cv2.imdecode(np.frombuffer(mask_bytes, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-    if mask_arr is None:
-        raise ValueError("bundle mask.png could not be decoded")
-    if mask_arr.dtype != np.uint16:
-        raise ValueError(f"bundle mask is not 16-bit grayscale (got {mask_arr.dtype})")
+    raw_shape = meta_json.get("image_shape")
+    if raw_shape is not None:
+        image_shape = (int(raw_shape[0]), int(raw_shape[1]))
+    else:
+        # v1 fallback: derive from the decoded image.
+        image_shape = (int(image_arr.shape[0]), int(image_arr.shape[1]))
 
     meta = BundleMeta(
         source_filename=meta_json["source_filename"],
+        image_shape=image_shape,
         scale_mm_per_px=meta_json.get("scale_mm_per_px"),
         next_label_id=meta_json["next_label_id"],
         regions={int(k): v for k, v in meta_json.get("regions", {}).items()},
@@ -252,7 +212,6 @@ def load_bundle(bundle_path: Path | str) -> BundleContents:
     return BundleContents(
         image=image_arr,
         image_ext=Path(image_name).suffix,
-        label_map=mask_arr,
         meta=meta,
     )
 
