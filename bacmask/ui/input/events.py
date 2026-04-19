@@ -11,7 +11,6 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class PointerDown:
     pos: tuple[float, float]
-    modifiers: tuple[str, ...] = ()
     is_double: bool = False
 
 

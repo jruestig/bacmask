@@ -186,6 +186,26 @@ class MaskService:
         self.state.brush_radius_px = r
         self._notify()
 
+    def set_brush_default_mode(self, mode: str) -> None:
+        """Set the persistent brush mode (``"add"`` or ``"subtract"``).
+
+        Press-down modifiers still override per knowledge/026: Ctrl forces
+        subtract, Shift forces add. This sets what the brush does when no
+        modifier is held.
+        """
+        if mode not in ("add", "subtract"):
+            raise ValueError(f"unknown brush mode: {mode!r}")
+        if self.state.brush_default_mode == mode:
+            return
+        self.state.brush_default_mode = mode  # type: ignore[assignment]
+        self._notify()
+
+    def toggle_brush_default_mode(self) -> str:
+        """Flip the persistent brush mode and return the new value."""
+        new_mode = "subtract" if self.state.brush_default_mode == "add" else "add"
+        self.set_brush_default_mode(new_mode)
+        return new_mode
+
     # ---- lasso --------------------------------------------------------------
 
     def begin_lasso(self, pos: tuple[int, int]) -> None:
@@ -270,34 +290,43 @@ class MaskService:
 
     # ---- brush stroke (knowledge/026) ---------------------------------------
 
-    def begin_brush_stroke(
-        self,
-        pos: tuple[int, int],
-        modifiers: Sequence[str] = (),
-    ) -> int | None:
+    def begin_brush_stroke(self, pos: tuple[int, int]) -> int | None:
         """Begin a brush stroke at image-space ``pos``.
 
-        Resolves the target region from the press-down pixel via ``label_map``
-        (highest-id wins on overlap). Modifier keys decide add vs. subtract:
-        no modifier or ``shift`` → add; ``ctrl`` → subtract (Ctrl wins over
-        Shift).
+        Target resolution:
 
-        Returns the locked target label_id, or ``None`` if the press-down hit
-        background (no-op, no history). On success, ``selected_region_id`` is
-        also set to the target.
+        1. If the press-down pixel hits an existing region, that region
+           becomes the target *and* the new selection. Tap a different region
+           to retarget.
+        2. Otherwise (background or out-of-bounds press-down) the existing
+           ``state.selected_region_id`` is the target. This is what enables
+           subtract-from-outside: you can carve into the region's boundary
+           starting from the empty pixels next to it.
+        3. If neither resolves to an existing region, return ``None`` (no
+           stroke, no history).
+
+        Mode (add vs. subtract) is driven solely by ``state.brush_default_mode``
+        — set via the toolbar Add/Subtract toggles or flipped with Tab. There
+        is no modifier-key override: the toggle is the mode.
         """
         if self.state.label_map is None:
             return None
         ix, iy = int(pos[0]), int(pos[1])
         h, w = self.state.label_map.shape
-        if not (0 <= ix < w and 0 <= iy < h):
-            return None
-        target = int(self.state.label_map[iy, ix])
-        if target == 0 or target not in self.state.regions:
+
+        target: int | None = None
+        if 0 <= ix < w and 0 <= iy < h:
+            hit = int(self.state.label_map[iy, ix])
+            if hit != 0 and hit in self.state.regions:
+                target = hit
+        if target is None:
+            sel = self.state.selected_region_id
+            if sel is not None and sel in self.state.regions:
+                target = sel
+        if target is None:
             return None
 
-        mods = {m.lower() for m in modifiers}
-        mode = "subtract" if "ctrl" in mods else "add"
+        mode = self.state.brush_default_mode
 
         r = self.state.brush_radius_px
         stroke_mask = np.zeros((h, w), dtype=bool)

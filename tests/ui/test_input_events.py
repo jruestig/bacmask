@@ -20,16 +20,10 @@ from bacmask.ui.input.events import (
 )
 
 
-def test_pointer_down_default_modifiers_empty():
+def test_pointer_down_pos():
     e = PointerDown(pos=(10, 20))
     assert e.pos == (10, 20)
-    assert e.modifiers == ()
-
-
-def test_pointer_down_with_modifiers():
-    e = PointerDown(pos=(10, 20), modifiers=("shift", "ctrl"))
-    assert "shift" in e.modifiers
-    assert "ctrl" in e.modifiers
+    assert e.is_double is False
 
 
 def test_events_are_frozen():
@@ -65,6 +59,10 @@ def test_keybinding_l_selects_lasso():
 
 def test_keybinding_b_selects_brush():
     assert keybinding_for("b", set()) == "select_brush"
+
+
+def test_keybinding_tab_toggles_brush_mode():
+    assert keybinding_for("tab", set()) == "toggle_brush_mode"
 
 
 def test_keybinding_e_alone_unbound():

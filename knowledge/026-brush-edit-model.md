@@ -29,16 +29,13 @@ Exactly one tool is active at a time; switching tools cancels any in-progress st
 
 Press-drag-release with the brush tool active:
 
-1. **Press-down** resolves the **target region** from the pixel under the cursor:
-   - Resolve via the display `label_map` (highest-id wins on overlap, per [025](025-overlapping-regions.md)).
-   - If the press-down pixel is background (no labeled region) → stroke is a **no-op**. The brush does not create new regions — that is the lasso's job. No history entry.
-   - Otherwise the hit region is locked as the target for the entire stroke. Dragging across other regions does **not** re-target.
-   - On successful resolution, `state.selected_region_id` is set to the target — the brush's target and the results-panel highlight / cyan outline are one and the same. This unifies "the region my next action will touch" with "the region I'm currently focused on."
-2. **Modifier at press-down** decides add vs. subtract:
-   - No modifier, or **Shift** → **add** (paint the brush stamp into `target_mask`).
-   - **Ctrl** → **subtract** (erase the brush stamp from `target_mask`).
-   - Holding both Shift+Ctrl → subtract (Ctrl wins, matches GIMP).
-   - The modifier state is captured at press-down and held for the duration of the stroke; releasing or changing the modifier mid-drag does not switch mode.
+1. **Press-down** resolves the **target region** in this priority order:
+   - If the pressed pixel hits an existing region in `label_map` (highest-id wins on overlap, per [025](025-overlapping-regions.md)), that region becomes the target *and* `state.selected_region_id` is set to it. Tapping another region thus re-targets the brush.
+   - Otherwise (background or out-of-bounds press-down) the existing `state.selected_region_id` is the target. The brush is **locked to the selected region** — this is what lets a subtract stroke begin on the empty pixels next to the boundary and carve a bite into the region from the outside in. Without the lock the user would have to start every subtract from inside the region, which made thin slices off the edge awkward.
+   - If neither the pressed pixel nor the selection resolves to an existing region → stroke is a **no-op**. The brush still cannot create new regions; that is the lasso's job. No history entry.
+   - Once resolved the target is locked for the entire stroke. Dragging across other regions or off the canvas does **not** re-target.
+   - The brush's target and the results-panel highlight / cyan outline are the same id — "the region my next action will touch" is the same as "the region I'm currently focused on."
+2. **Mode (add vs. subtract)** is read at press-down from `state.brush_default_mode`. The mode is set by the toolbar Add / Subtract toggles in the brush panel and flipped with the **Tab** hotkey. There is **no modifier-key override** — the toggle is the mode. Switching the toggle mid-stroke does not affect the in-flight stroke; the read is at press-down only.
 3. **Drag** accumulates pointer samples. Each sample stamps a filled disc of radius `brush_radius_px` into the stroke's temp bool mask `S`.
    - Between samples, the disc is swept along the straight segment (`cv2.line` with `thickness = 2 * brush_radius_px`) so there are no gaps at fast cursor speeds.
    - `S` lives in the stroke buffer only; the stored region's mask is not touched until release.

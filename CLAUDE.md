@@ -109,12 +109,11 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
      - Keyboard close: `Enter` (equivalent trigger for stylus loss-of-contact).
      - Cancel in-progress lasso: `Escape`.
      - Lassos with fewer than 3 points or zero enclosed area are silently discarded.
-   - **Brush (`B`)** — edits existing regions ([knowledge/026](knowledge/026-brush-edit-model.md)). Select the brush tool, then press-drag on a region:
-     - Default or **`Shift`** held → **add** paint into the region under the press-down point.
-     - **`Ctrl`** held → **subtract** paint from that region.
-     - The target is locked at press-down — dragging across other regions does not re-target.
-     - Press-down on background = no-op. The brush cannot create new regions.
-     - If `Ctrl` empties the region entirely, the edit resolves as a Delete.
+   - **Brush (`B`)** — edits existing regions ([knowledge/026](knowledge/026-brush-edit-model.md)). Select the brush tool, then press-drag:
+     - Mode (add / subtract) is set via the **Add** / **Subtract** toggles in the brush panel and flipped with **`Tab`**. There is no modifier-key override — the toggle is the mode.
+     - The target locks at press-down: a hit on an existing region selects + targets it; press-down on background uses the currently selected region as target. This lets a subtract begin off the boundary and carve in from outside.
+     - With no selected region, a press on background is a no-op. The brush cannot create new regions.
+     - If a subtract empties the region entirely, the edit resolves as a Delete.
      - Overlap with other regions is allowed — edits are strictly per-target ([knowledge/025](knowledge/025-overlapping-regions.md)).
      - Brush radius is a session-local scalar in a toolbar numeric field (default 8 px, image-space).
    - **Delete region (`Delete` / `Backspace`):** select region → delete key or toolbar button. Label ID is NOT re-used.

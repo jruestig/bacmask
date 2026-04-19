@@ -32,6 +32,7 @@ DEFAULT_KEYBINDINGS: dict[tuple[str, frozenset[str]], str] = {
     ("o", frozenset({"ctrl"})): "load_image",
     ("l", frozenset()): "select_lasso",
     ("b", frozenset()): "select_brush",
+    ("tab", frozenset()): "toggle_brush_mode",
 }
 
 _TRACKED_MODIFIERS = ("ctrl", "shift", "alt", "meta")
@@ -39,24 +40,6 @@ _TRACKED_MODIFIERS = ("ctrl", "shift", "alt", "meta")
 
 def _filter_modifiers(modifiers) -> tuple[str, ...]:
     return tuple(m for m in _TRACKED_MODIFIERS if m in modifiers)
-
-
-def _window_modifiers() -> tuple[str, ...]:
-    """Read the live modifier set from Kivy's Window, if available.
-
-    Returns an empty tuple when Kivy isn't initialized (tests, headless use).
-    Kivy maintains ``Window.modifiers`` as the authoritative live keyboard
-    state and updates it before dispatching touch events, regardless of who
-    owns the ``on_key_down`` callback.
-    """
-    try:
-        from kivy.core.window import Window  # local import: kivy may be absent in tests
-    except Exception:
-        return ()
-    raw = getattr(Window, "modifiers", None)
-    if not raw:
-        return ()
-    return tuple(raw)
 
 
 def keybinding_for(key: str, modifiers: set[str] | frozenset[str]) -> str | None:
@@ -71,6 +54,7 @@ _KEY_DISPLAY: dict[str, str] = {
     "escape": "Esc",
     "delete": "Del",
     "backspace": "Backspace",
+    "tab": "Tab",
 }
 
 # Ordered list — modifiers render in this order regardless of set iteration.
@@ -123,9 +107,6 @@ class DesktopInputAdapter:
         # One of: None, "pointer", "pan".
         self._drag_mode: str | None = None
         self._last_pan_pos: tuple[float, float] | None = None
-        # Modifier state — Kivy touches do not reliably carry modifiers, so we
-        # mirror them from on_key_down/on_key_up and stamp PointerDown ourselves.
-        self._modifiers: set[str] = set()
 
     # ---- Kivy touch events ---------------------------------------------------
 
@@ -140,22 +121,9 @@ class DesktopInputAdapter:
             self._last_pan_pos = (touch.x, touch.y)
             return True
         self._drag_mode = "pointer"
-        # Source modifiers in priority order:
-        #   1) the touch itself (some Kivy backends populate ``touch.modifiers``)
-        #   2) Kivy's Window.modifiers (authoritative — Kivy updates this from
-        #      keyboard events even when our App owns the Window.on_key_down
-        #      callback, which the adapter's own on_key_down would otherwise miss)
-        #   3) the adapter's local mirror, if both above are empty
-        touch_mods = getattr(touch, "modifiers", None)
-        if touch_mods:
-            mods = _filter_modifiers(touch_mods)
-        else:
-            win_mods = _window_modifiers()
-            mods = _filter_modifiers(win_mods if win_mods else self._modifiers)
         self._emit(
             PointerDown(
                 pos=(touch.x, touch.y),
-                modifiers=mods,
                 is_double=bool(getattr(touch, "is_double_tap", False)),
             )
         )
@@ -189,32 +157,8 @@ class DesktopInputAdapter:
 
     def on_key_down(self, keyboard, keycode, text, modifiers) -> bool:
         key_name = keycode[1] if isinstance(keycode, tuple) else str(keycode)
-        self._update_modifier(key_name, pressed=True)
         action_name = keybinding_for(key_name, set(modifiers))
         if action_name is not None:
             self._emit(Action(name=action_name))
             return True
         return False
-
-    def on_key_up(self, keyboard, keycode) -> bool:
-        key_name = keycode[1] if isinstance(keycode, tuple) else str(keycode)
-        self._update_modifier(key_name, pressed=False)
-        return False
-
-    def _update_modifier(self, key_name: str, pressed: bool) -> None:
-        kn = key_name.lower()
-        mod = None
-        if kn in ("lctrl", "rctrl", "ctrl"):
-            mod = "ctrl"
-        elif kn in ("lshift", "rshift", "shift"):
-            mod = "shift"
-        elif kn in ("lalt", "ralt", "alt"):
-            mod = "alt"
-        elif kn in ("lmeta", "rmeta", "meta", "super"):
-            mod = "meta"
-        if mod is None:
-            return
-        if pressed:
-            self._modifiers.add(mod)
-        else:
-            self._modifiers.discard(mod)

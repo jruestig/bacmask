@@ -55,6 +55,10 @@ class SessionState:
     active_tool: Tool = "lasso"
     # Image-space radius for the brush stamp. Session-local (knowledge/026).
     brush_radius_px: int = defaults.BRUSH_RADIUS_DEFAULT_PX
+    # Persistent default brush mode. Modifier keys at press-down still
+    # override per knowledge/026 (Ctrl→subtract, Shift→add); this is the
+    # unmodified default driven by the toolbar Add/Subtract toggles.
+    brush_default_mode: Literal["add", "subtract"] = "add"
     # Per-stroke buffer. None when no brush stroke is in flight.
     active_brush_stroke: BrushStroke | None = None
     dirty: bool = False

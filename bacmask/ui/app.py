@@ -97,6 +97,8 @@ class BacMaskApp(App):
             svc.set_active_tool("lasso")
         elif action == "select_brush":
             svc.set_active_tool("brush")
+        elif action == "toggle_brush_mode":
+            svc.toggle_brush_default_mode()
         elif action == "load_image":
             self._open_load_dialog()
         else:
@@ -198,6 +200,7 @@ class BacMaskApp(App):
 
 # Minimal Kivy key-code → name mapping. Extend as needed.
 _SPECIAL_KEYS: dict[int, str] = {
+    9: "tab",
     13: "enter",
     271: "numpadenter",
     27: "escape",

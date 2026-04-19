@@ -23,6 +23,7 @@ Session-handoff doc. Updated at the end of each working session. What follows `k
 7. **Region rename.** Users can't change `region_01` / `region_02` names today. Inline edit in the results panel. Post-MVP.
 
 ## Recently completed (last ~3 sessions)
+- **Lasso dashed closing chord (session 5).** `ImageCanvas._repaint` now draws a dashed yellow line from the current cursor (`_last_pointer_pos`) to `active_lasso[0]` while a lasso is in progress. Pure visual preview of the snap-close chord — no service / commit path change. `cv2.fillPoly` already closes the polygon implicitly on release, so the rasterized region matches what the dashed line shows the user.
 - **Rendering perf pass (session 4).**
   - `SessionState.regions_version` — monotonic counter bumped by every region-mutating command and by `load_bundle`/`set_image`. Canvas gates overlay-texture rebuild on it. Selection / mode / calibration notifies no longer rebuild the full-res RGBA composite.
   - `state.active_lasso` now holds the growing list reference during drag — no more per-sample `np.asarray(full_list)`. Only converted to ndarray at close.

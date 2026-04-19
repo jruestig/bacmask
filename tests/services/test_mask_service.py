@@ -461,6 +461,43 @@ def test_set_brush_radius_clamps_and_validates():
         svc.set_brush_radius(101)
 
 
+def test_default_brush_mode_is_add():
+    svc = MaskService()
+    assert svc.state.brush_default_mode == "add"
+
+
+def test_set_brush_default_mode_subtract():
+    svc = MaskService()
+    svc.set_brush_default_mode("subtract")
+    assert svc.state.brush_default_mode == "subtract"
+
+
+def test_set_brush_default_mode_rejects_unknown():
+    svc = MaskService()
+    with pytest.raises(ValueError):
+        svc.set_brush_default_mode("erase")
+
+
+def test_brush_default_mode_drives_unmodified_stroke(tmp_path):
+    """No modifier + default subtract → stroke is subtract."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))
+    svc.set_brush_default_mode("subtract")
+
+    svc.begin_brush_stroke((15, 15))
+    assert svc.state.active_brush_stroke.mode == "subtract"
+
+
+def test_toggle_brush_default_mode_flips():
+    svc = MaskService()
+    assert svc.state.brush_default_mode == "add"
+    assert svc.toggle_brush_default_mode() == "subtract"
+    assert svc.state.brush_default_mode == "subtract"
+    assert svc.toggle_brush_default_mode() == "add"
+    assert svc.state.brush_default_mode == "add"
+
+
 # ---- zero-area guard ----
 
 
@@ -546,11 +583,12 @@ def test_close_lasso_discards_zero_area_polygon(tmp_path, caplog):
 def _run_brush(
     svc: MaskService,
     samples: list[tuple[int, int]],
-    modifiers: tuple[str, ...] = (),
+    mode: str = "add",
 ) -> str | None:
     """Drive the service through a full brush stroke: begin → samples → end."""
     svc.set_active_tool("brush")
-    target = svc.begin_brush_stroke(samples[0], modifiers=modifiers)
+    svc.set_brush_default_mode(mode)
+    target = svc.begin_brush_stroke(samples[0])
     if target is None:
         return None
     for p in samples[1:]:
@@ -558,16 +596,72 @@ def _run_brush(
     return svc.end_brush_stroke()
 
 
-def test_begin_brush_stroke_on_background_is_noop(tmp_path):
+def test_begin_brush_stroke_on_background_is_noop_without_selection(tmp_path):
+    """No selected region + press on background → no stroke."""
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))
+    svc.clear_selection()
     history_before = len(svc.history)
 
     target = svc.begin_brush_stroke((40, 40))  # background
     assert target is None
     assert svc.state.active_brush_stroke is None
     assert len(svc.history) == history_before
+
+
+def test_begin_brush_stroke_off_region_uses_selected_target(tmp_path):
+    """When a region is selected, pressing off it locks the stroke to the
+    selection — required so a subtract can carve into the boundary from the
+    empty pixels next to it."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))
+    svc.select_region(1)
+
+    target = svc.begin_brush_stroke((40, 40))  # background pixel
+    assert target == 1
+    assert svc.state.active_brush_stroke is not None
+    assert svc.state.active_brush_stroke.target_id == 1
+
+
+def test_brush_subtract_from_outside_carves_into_region(tmp_path):
+    """End-to-end: with subtract mode set + region selected, a stroke that
+    begins on background and drags into the region carves out a bite from
+    the boundary."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))  # region 1, 121 px
+    svc.select_region(1)
+    before = int(svc.state.region_masks[1].sum())
+    svc.set_brush_radius(3)
+    svc.set_brush_default_mode("subtract")
+
+    # Press starts well outside the region (x=2), drags right through the
+    # left boundary (x=10) into the interior. With the selection lock the
+    # stroke targets region 1 even though press-down is on background.
+    svc.set_active_tool("brush")
+    target = svc.begin_brush_stroke((2, 15))
+    assert target == 1
+    for x in (5, 8, 12, 15):
+        svc.add_brush_sample((x, 15))
+    result = svc.end_brush_stroke()
+    assert result == "subtracted"
+    assert int(svc.state.region_masks[1].sum()) < before
+
+
+def test_begin_brush_stroke_press_on_other_region_retargets(tmp_path):
+    """Pressing on a different existing region switches the lock to it."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(5, 5, 8))  # region 1
+    _draw_lasso(svc, _square(30, 30, 8))  # region 2
+    svc.select_region(1)
+
+    target = svc.begin_brush_stroke((33, 33))  # press on region 2
+    assert target == 2
+    assert svc.state.active_brush_stroke.target_id == 2
+    assert svc.state.selected_region_id == 2
 
 
 def test_begin_brush_stroke_locks_target_and_selects_it(tmp_path):
@@ -583,20 +677,14 @@ def test_begin_brush_stroke_locks_target_and_selects_it(tmp_path):
     assert svc.state.active_brush_stroke.mode == "add"
 
 
-def test_begin_brush_stroke_ctrl_modifier_subtract(tmp_path):
+def test_begin_brush_stroke_uses_default_mode(tmp_path):
+    """Mode comes from state.brush_default_mode — no modifier override."""
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))
+    svc.set_brush_default_mode("subtract")
 
-    svc.begin_brush_stroke((15, 15), modifiers=("ctrl",))
-    assert svc.state.active_brush_stroke.mode == "subtract"
-
-
-def test_begin_brush_stroke_ctrl_wins_over_shift(tmp_path):
-    svc = MaskService()
-    svc.load_image(_write_image(tmp_path))
-    _draw_lasso(svc, _square(10, 10, 10))
-    svc.begin_brush_stroke((15, 15), modifiers=("shift", "ctrl"))
+    svc.begin_brush_stroke((15, 15))
     assert svc.state.active_brush_stroke.mode == "subtract"
 
 
@@ -622,8 +710,8 @@ def test_brush_subtract_cuts_a_bite(tmp_path):
     before = int(svc.state.region_masks[1].sum())
     svc.set_brush_radius(2)
 
-    # Press inside with Ctrl → subtract; drag along the bottom edge.
-    result = _run_brush(svc, [(13, 18), (16, 18), (18, 18)], modifiers=("ctrl",))
+    # Subtract mode set; press inside; drag along the bottom edge.
+    result = _run_brush(svc, [(13, 18), (16, 18), (18, 18)], mode="subtract")
     assert result == "subtracted"
     after = int(svc.state.region_masks[1].sum())
     assert after < before
@@ -640,7 +728,7 @@ def test_brush_subtract_emptying_routes_to_delete(tmp_path):
     id_before = svc.state.next_label_id
     svc.set_brush_radius(5)
 
-    result = _run_brush(svc, [(11, 11)], modifiers=("ctrl",))
+    result = _run_brush(svc, [(11, 11)], mode="subtract")
     assert result == "deleted"
     assert 1 not in svc.state.regions
     assert 1 not in svc.state.region_masks

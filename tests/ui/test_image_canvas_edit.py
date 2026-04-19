@@ -101,12 +101,13 @@ def test_lasso_tool_tap_on_background_starts_new_lasso():
 # ---- brush tool: targeting -------------------------------------------------
 
 
-def test_brush_press_on_background_is_noop():
+def test_brush_press_on_background_without_selection_is_noop():
     svc = _service_with_region()
     svc.set_active_tool("brush")
+    svc.clear_selection()
     c = _canvas(svc)
     pos = _widget_pos_for_image_pixel(c, (40.0, 40.0), (50, 50))
-    c._on_input(PointerDown(pos=pos, modifiers=(), is_double=False))
+    c._on_input(PointerDown(pos=pos, is_double=False))
     assert svc.state.active_brush_stroke is None
 
 
@@ -115,19 +116,20 @@ def test_brush_press_on_region_begins_stroke_and_selects():
     svc.set_active_tool("brush")
     c = _canvas(svc)
     pos = _widget_pos_for_image_pixel(c, (15.0, 15.0), (50, 50))
-    c._on_input(PointerDown(pos=pos, modifiers=(), is_double=False))
+    c._on_input(PointerDown(pos=pos, is_double=False))
     assert svc.state.active_brush_stroke is not None
     assert svc.state.active_brush_stroke.target_id == 1
     assert svc.state.active_brush_stroke.mode == "add"
     assert svc.state.selected_region_id == 1
 
 
-def test_brush_press_with_ctrl_subtracts():
+def test_brush_press_with_subtract_mode():
     svc = _service_with_region()
     svc.set_active_tool("brush")
+    svc.set_brush_default_mode("subtract")
     c = _canvas(svc)
     pos = _widget_pos_for_image_pixel(c, (15.0, 15.0), (50, 50))
-    c._on_input(PointerDown(pos=pos, modifiers=("ctrl",), is_double=False))
+    c._on_input(PointerDown(pos=pos, is_double=False))
     assert svc.state.active_brush_stroke.mode == "subtract"
 
 
@@ -143,7 +145,6 @@ def test_brush_drag_release_grows_region():
     c._on_input(
         PointerDown(
             pos=_widget_pos_for_image_pixel(c, path[0], (50, 50)),
-            modifiers=(),
             is_double=False,
         )
     )
@@ -155,10 +156,11 @@ def test_brush_drag_release_grows_region():
     assert int(svc.state.region_masks[1].sum()) > before
 
 
-def test_brush_ctrl_drag_release_shrinks_region():
+def test_brush_subtract_drag_release_shrinks_region():
     svc = _service_with_region()
     svc.set_active_tool("brush")
     svc.set_brush_radius(2)
+    svc.set_brush_default_mode("subtract")
     before = int(svc.state.region_masks[1].sum())
 
     c = _canvas(svc)
@@ -166,7 +168,6 @@ def test_brush_ctrl_drag_release_shrinks_region():
     c._on_input(
         PointerDown(
             pos=_widget_pos_for_image_pixel(c, path[0], (50, 50)),
-            modifiers=("ctrl",),
             is_double=False,
         )
     )

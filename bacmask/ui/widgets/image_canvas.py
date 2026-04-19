@@ -228,6 +228,20 @@ class ImageCanvas(Widget):
                 pts = self._image_points_to_widget(lasso, (img_w, img_h))
                 Color(*LASSO_PREVIEW_COLOR)
                 Line(points=pts, width=1.2)
+            # Dashed closing chord: cursor → lasso start. Previews the snap-close
+            # chord that cv2.fillPoly applies implicitly on release.
+            if lasso is not None and len(lasso) >= 1 and self._last_pointer_pos is not None:
+                start_pts = self._image_points_to_widget([lasso[0]], (img_w, img_h))
+                if start_pts:
+                    sx, sy = start_pts[0], start_pts[1]
+                    cx, cy = self._last_pointer_pos
+                    Color(*LASSO_PREVIEW_COLOR)
+                    Line(
+                        points=[sx, sy, cx, cy],
+                        width=1.0,
+                        dash_length=6,
+                        dash_offset=4,
+                    )
 
             # Brush cursor circle — render only while the brush is active and
             # we have a known pointer position on this canvas.
@@ -353,7 +367,7 @@ class ImageCanvas(Widget):
                 return
             tool = self.service.state.active_tool
             if tool == "brush":
-                self._on_brush_pointer_down(xy, event.modifiers)
+                self._on_brush_pointer_down(xy)
             else:
                 self._on_lasso_pointer_down(xy)
         elif isinstance(event, PointerMove):
@@ -392,15 +406,11 @@ class ImageCanvas(Widget):
         self.service.clear_selection()
         self.service.begin_lasso(xy)
 
-    def _on_brush_pointer_down(
-        self,
-        xy: tuple[int, int],
-        modifiers: tuple[str, ...],
-    ) -> None:
-        """Brush tool: press-down on a region begins a stroke; on bg = no-op."""
-        target = self.service.begin_brush_stroke(xy, modifiers=modifiers)
+    def _on_brush_pointer_down(self, xy: tuple[int, int]) -> None:
+        """Brush tool: press-down resolves a target via the selection lock."""
+        target = self.service.begin_brush_stroke(xy)
         if target is None:
-            # No-op on background. Spec: brush cannot create regions.
+            # No region under cursor and no selection → no-op.
             self._brush_preview_pts = []
             return
         self._brush_preview_pts = [xy]
@@ -534,6 +544,8 @@ class ImageCanvas(Widget):
             svc.set_active_tool("lasso")
         elif name == "select_brush":
             svc.set_active_tool("brush")
+        elif name == "toggle_brush_mode":
+            svc.toggle_brush_default_mode()
 
     def _widget_pos_to_image(
         self,
