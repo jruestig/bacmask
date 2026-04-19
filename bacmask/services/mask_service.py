@@ -15,6 +15,7 @@ import zipfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from bacmask.config import defaults
@@ -73,33 +74,6 @@ def _expand_bbox(
         min(a[2], b[2]),
         max(a[3], b[3]),
     )
-
-
-def _any_outside_bbox(
-    mask: np.ndarray,
-    y0: int,
-    y1: int,
-    x0: int,
-    x1: int,
-) -> bool:
-    """True iff any True pixel of ``mask`` lies outside the rectangle [y0:y1, x0:x1].
-
-    Used by the brush commit fast-path to decide whether a subtract that
-    emptied the stroke bbox actually emptied the entire region. Avoids a full
-    ``mask.any()`` scan when the bbox already covers most of the image: each
-    side strip is at most one row/column tall, so the total work is O(H + W)
-    in the worst case (and short-circuits on the first hit).
-    """
-    h, w = mask.shape
-    if y0 > 0 and mask[:y0, :].any():
-        return True
-    if y1 < h and mask[y1:, :].any():
-        return True
-    if x0 > 0 and mask[y0:y1, :x0].any():
-        return True
-    if x1 < w and mask[y0:y1, x1:].any():
-        return True
-    return False
 
 
 class MaskService:
@@ -404,11 +378,12 @@ class MaskService:
         * ``"deleted"`` — subtract emptied the region; routed via DeleteRegionCommand.
         * ``None`` — discarded silently (no intersection or no-op).
 
-        The connected-component pass and contour re-derivation are restricted
-        to the bounding box of the post-edit mask — for a small region in a
-        large image this is the difference between operating on a few hundred
-        pixels and a few million. The full-image mask is only built (in place
-        from the target snapshot) when something actually changes.
+        For add/subtract, the target polygon is rasterized on demand into a
+        bbox-local scratch buffer (union of stroke bbox and target vertex
+        bbox); the boolean op, connected-component filter, and contour
+        re-derivation all run on that scratch buffer and nothing survives
+        past the commit. No stored per-region mask is consulted
+        (knowledge/030).
         """
         stroke = self.state.active_brush_stroke
         if stroke is None:
@@ -439,70 +414,98 @@ class MaskService:
             return self._commit_brush_create(s_mask, sy0, sy1, sx0, sx1)
 
         # ---- add / subtract editing path -----------------------------------
+        # Knowledge/030: the target's per-region mask is NOT read from state.
+        # Instead the target polygon is rasterized on demand into a bbox-local
+        # scratch buffer, the boolean op runs on the cropped buffers, and the
+        # scratch is discarded once the new polygon has been extracted. No
+        # stored mask participates in the math.
         target_id = stroke.target_id
         if target_id is None or target_id not in self.state.regions:
             self._notify()
             return None
-        target_mask = self.state.region_masks.get(target_id)
-        if target_mask is None:
+
+        target_verts = np.asarray(
+            self.state.regions[target_id]["vertices"], dtype=np.int32
+        ).reshape(-1, 2)
+        if len(target_verts) < 3:
             self._notify()
             return None
 
-        target_crop = target_mask[sy0:sy1, sx0:sx1]
+        h, w = s_mask.shape
 
-        # No-op detection on the crop (cheap):
-        #   add      → no painted pixel lay outside the target
-        #   subtract → brush never touched any target pixel
+        # Working bbox = union of stroke bbox and the target polygon's vertex
+        # bbox. Both modes need this union:
+        #   * add — the new boundary can extend past the target's old
+        #     footprint, so the buffer must hold the stroke too.
+        #   * subtract — the region after the op still has all the target's
+        #     pixels outside the stroke bbox. If we only allocated within the
+        #     stroke bbox, the subsequent connected-component + contour pass
+        #     would see a truncated region and return a polygon tracing only
+        #     the sliver inside the stroke bbox, not the full post-edit
+        #     region. The scratch buffer is bbox-local, but the locality must
+        #     cover the entire target, not just the painted part.
+        tx0 = max(0, int(target_verts[:, 0].min()))
+        tx1 = min(w, int(target_verts[:, 0].max()) + 1)
+        ty0 = max(0, int(target_verts[:, 1].min()))
+        ty1 = min(h, int(target_verts[:, 1].max()) + 1)
+        uy0 = min(sy0, ty0)
+        uy1 = max(sy1, ty1)
+        ux0 = min(sx0, tx0)
+        ux1 = max(sx1, tx1)
+
+        # Rasterize the target polygon into a bbox-local scratch buffer.
+        # cv2.fillPoly directly on a pre-zeroed bbox-sized uint8 array with
+        # translated vertex coords is cheaper than rasterizing the full image
+        # and slicing — that's the whole point of the transient-local approach
+        # (knowledge/030).
+        tgt_u8 = np.zeros((uy1 - uy0, ux1 - ux0), dtype=np.uint8)
+        translated = target_verts.copy()
+        translated[:, 0] -= ux0
+        translated[:, 1] -= uy0
+        cv2.fillPoly(tgt_u8, [translated.reshape(-1, 1, 2)], color=1)
+        target_crop = tgt_u8.astype(bool)
+
+        # Stroke mask aligned to the working bbox. For subtract this equals
+        # s_crop; for add the union bbox can extend past the stroke footprint,
+        # so a fresh view into s_mask is required.
+        s_crop_u = s_mask[uy0:uy1, ux0:ux1]
+
         if stroke.mode == "add":
-            if not (s_crop & ~target_crop).any():
+            # No-op: every painted pixel already inside target.
+            if not (s_crop_u & ~target_crop).any():
                 self._notify()
                 return None
+            new_crop = target_crop | s_crop_u
         else:
-            if not (s_crop & target_crop).any():
+            # No-op: brush never touched any target pixel.
+            if not (s_crop_u & target_crop).any():
                 self._notify()
                 return None
+            new_crop = target_crop & ~s_crop_u
 
-        # Apply the boolean op in place on a copy of the target mask, but only
-        # within the stroke bbox — the rest of the mask is identical to the
-        # target by construction.
-        new_mask = target_mask.copy()
-        if stroke.mode == "add":
-            np.bitwise_or(target_crop, s_crop, out=new_mask[sy0:sy1, sx0:sx1])
-        else:
-            np.logical_and(target_crop, ~s_crop, out=new_mask[sy0:sy1, sx0:sx1])
-
-        # Subtract emptied the region → route via DeleteRegionCommand so the
-        # undo path + monotonic-id behavior are unified with explicit delete.
-        # Cheap check: subtract result is bounded by target, so only the bbox
-        # needs inspecting.
-        if stroke.mode == "subtract" and not new_mask[sy0:sy1, sx0:sx1].any():
-            # The subtract emptied the stroke bbox; need to confirm nothing
-            # else remains outside the bbox. Outside the bbox new_mask equals
-            # target_mask, so an "empty" outcome requires target outside bbox
-            # to also be empty — i.e. target was entirely inside the bbox.
-            if not _any_outside_bbox(target_mask, sy0, sy1, sx0, sx1):
-                cmd = DeleteRegionCommand(label_id=target_id)
-                self.history.push(cmd, self.state)
-                if self.state.selected_region_id == target_id:
-                    self.state.selected_region_id = None
-                self._notify()
-                return "deleted"
-
-        # Bbox of the post-edit mask. For subtract this is ⊆ target's bbox;
-        # for add it's union(target_bbox, stroke_bbox). Computing it via
-        # np.where on the full mask is one more O(HxW) pass — acceptable, and
-        # the CC / contour ops on the resulting crop are tiny by comparison.
-        n_ys, n_xs = np.where(new_mask)
-        if len(n_ys) == 0:
-            # Defensive — handled by the subtract branch above, but covers add
-            # edge cases too.
+        # Final no-op: if the boolean op produced the same pixels as target
+        # on the scratch buffer (and subtract leaves anything outside the
+        # buffer unchanged), nothing changed in practice.
+        if np.array_equal(new_crop, target_crop):
             self._notify()
             return None
-        ny0, ny1 = int(n_ys.min()), int(n_ys.max()) + 1
-        nx0, nx1 = int(n_xs.min()), int(n_xs.max()) + 1
 
-        crop = new_mask[ny0:ny1, nx0:nx1]
-        filtered_crop = masking.largest_connected_component(crop)
+        # Subtract that emptied the target → route via DeleteRegionCommand so
+        # undo + monotonic-id behavior stay unified with explicit delete.
+        # The working bbox covers the entire target polygon by construction
+        # (see bbox selection above), so "new_crop has no True pixels" is
+        # equivalent to "the region is empty".
+        if stroke.mode == "subtract" and not new_crop.any():
+            cmd = DeleteRegionCommand(label_id=target_id)
+            self.history.push(cmd, self.state)
+            if self.state.selected_region_id == target_id:
+                self.state.selected_region_id = None
+            self._notify()
+            return "deleted"
+
+        # Cleanup: largest connected component + contour re-derivation on the
+        # scratch crop. Same deterministic pipeline as close_lasso.
+        filtered_crop = masking.largest_connected_component(new_crop)
         if not filtered_crop.any():
             self._notify()
             return None
@@ -511,18 +514,18 @@ class MaskService:
             self._notify()
             return None
 
-        # Paste the filtered CC back into the full mask. Outside the new-mask
-        # bbox there is nothing (by definition of bbox), so a fresh zero mask
-        # + bbox paste is exact.
-        filtered = np.zeros_like(new_mask)
-        filtered[ny0:ny1, nx0:nx1] = filtered_crop
         # Translate vertex coords from crop-space back to image-space.
-        new_vertices = crop_verts + np.array([nx0, ny0], dtype=np.int32)
+        new_vertices = crop_verts + np.array([ux0, uy0], dtype=np.int32)
+
+        # Wave-1 compat (knowledge/030): BrushStrokeCommand still takes a
+        # full-image mask. Rasterize the final polygon once and hand it over.
+        # Wave 2 will remove the parameter entirely.
+        full_mask = masking.rasterize_polygon_mask(new_vertices, s_mask.shape)
 
         edit_cmd = BrushStrokeCommand(
             label_id=target_id,
             new_vertices=new_vertices,
-            new_region_mask=filtered,
+            new_region_mask=full_mask,
         )
         self.history.push(edit_cmd, self.state)
         self._notify()
@@ -615,18 +618,20 @@ class MaskService:
     # ---- derived ------------------------------------------------------------
 
     def compute_area_rows(self) -> list[io_manager.AreaRow]:
-        """Per-region area rows. Counts each region's own pixels (region_masks),
-        so overlapping pixels are counted once per region (knowledge/025).
+        """Per-region area rows. Area is the polygon's mathematical enclosed
+        area via the shoelace formula — not a rasterized pixel count. Each
+        region's area is independent of every other region's, so overlapping
+        pixels are counted once per region (knowledge/025, knowledge/030).
 
-        Reads the per-region area from ``state.region_areas`` — kept in sync
-        by commands on every edit, so this method never re-sums HxW masks.
+        Derived on demand from ``meta["vertices"]`` — no cache is read. O(N)
+        in vertex count per region; sub-millisecond for 1000 regions.
         """
         if self.state.image_filename is None or not self.state.regions:
             return []
         scale = self.state.scale_mm_per_px
         rows: list[io_manager.AreaRow] = []
         for label_id, meta in sorted(self.state.regions.items()):
-            px = self.state.region_areas.get(label_id, 0)
+            px = masking.polygon_area(meta["vertices"])
             rows.append(
                 io_manager.AreaRow(
                     filename=self.state.image_filename,

@@ -179,13 +179,14 @@ def test_set_calibration_accepts_none_uncalibrated(tmp_path):
 def test_area_rows_uncalibrated(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
-    _draw_lasso(svc, _square())  # 11x11 = 121 px
+    _draw_lasso(svc, _square())  # contour of 11x11 raster block: shoelace = 100.0
     rows = svc.compute_area_rows()
     assert len(rows) == 1
     r = rows[0]
     assert r.region_id == 1
     assert r.region_name == "region_01"
-    assert r.area_px == 121
+    # Shoelace of the polygon (knowledge/030), not rasterized pixel count.
+    assert r.area_px == pytest.approx(100.0, abs=1e-9)
     assert r.area_mm2 is None
     assert r.scale_factor is None
 
@@ -193,11 +194,35 @@ def test_area_rows_uncalibrated(tmp_path):
 def test_area_rows_calibrated(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
-    _draw_lasso(svc, _square())  # 121 px
+    _draw_lasso(svc, _square())  # shoelace = 100.0
     svc.set_calibration(0.01)
     r = svc.compute_area_rows()[0]
-    assert r.area_mm2 == pytest.approx(121 * 0.0001, abs=1e-12)
+    assert r.area_mm2 == pytest.approx(100.0 * 0.0001, abs=1e-12)
     assert r.scale_factor == 0.01
+
+
+def test_compute_area_rows_uses_polygon_shoelace(tmp_path):
+    """area_px must match polygon_area(vertices), not rasterized count.
+
+    Drives the service directly and compares the returned area to the
+    shoelace of the region's stored polygon. This is the anchor against
+    regression to the old cached-``region_areas`` code path.
+    """
+    from bacmask.core import masking
+
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    # Triangle with corners (5, 5), (25, 5), (5, 25) — shoelace = 200.0
+    # before raster round-trip. After the lasso's contour-re-derivation the
+    # stored polygon is the pixel-centered boundary trace of the filled
+    # triangle, so we compare against its shoelace rather than 200.0.
+    _draw_lasso(svc, [(5, 5), (25, 5), (5, 25)])
+    stored = svc.state.regions[1]["vertices"]
+    expected = masking.polygon_area(stored)
+    assert expected > 0.0  # sanity: non-degenerate
+    r = svc.compute_area_rows()[0]
+    assert isinstance(r.area_px, float)
+    assert r.area_px == pytest.approx(expected, abs=1e-9)
 
 
 # ---- save / load round-trip ----
@@ -542,19 +567,21 @@ def test_region_masks_restored_on_undo(tmp_path):
     assert svc.state.region_masks[1].sum() == pixels
 
 
-def test_area_uses_region_masks_not_label_map(tmp_path):
+def test_area_is_overlap_inclusive(tmp_path):
+    """Each region's area is its own polygon's shoelace, independent of other
+    regions' coverage — overlapping pixels are counted once per region
+    (knowledge/025, knowledge/030).
+    """
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
+    # Two identical squares fully overlap. Each one's area must equal the
+    # shoelace of its own polygon; the sum exceeds the union's area.
     _draw_lasso(svc, _square())
-
-    # Simulate an overlap by manually extending region 1's mask to cover pixels
-    # owned by a second region in the label_map. compute_area_rows must count
-    # the region_mask, not the label_map — overlap-inclusive per knowledge/025.
-    svc.state.region_masks[1] = np.ones_like(svc.state.label_map, dtype=bool)
-    svc.state.region_areas[1] = int(svc.state.region_masks[1].sum())
+    _draw_lasso(svc, _square())
     rows = svc.compute_area_rows()
-    h, w = svc.state.label_map.shape
-    assert rows[0].area_px == h * w
+    assert len(rows) == 2
+    assert rows[0].area_px == pytest.approx(rows[1].area_px, abs=1e-9)
+    assert rows[0].area_px == pytest.approx(100.0, abs=1e-9)
 
 
 def test_load_bundle_rebuilds_region_masks(tmp_path):
@@ -917,3 +944,44 @@ def test_brush_notifies_observers(tmp_path):
     svc.subscribe(lambda: calls.append(1))
     _run_brush(svc, [(15, 15), (22, 15)])
     assert sum(calls) >= 1
+
+
+def test_brush_add_does_not_read_region_masks(tmp_path):
+    """Brush add must commit correctly even when ``state.region_masks`` is
+    stale (i.e. does not reflect the current polygon). After the wave-2
+    removal this is guaranteed by construction; for now, force the staleness
+    by zeroing ``state.region_masks[target]`` before the commit and verify
+    the new polygon traces the real union of (real target polygon) ∪
+    (stroke footprint), not the zeros.
+
+    See knowledge/030 — polygons are the only mask truth; the brush commit
+    path rasterizes the target on demand rather than reading a stored mask.
+    """
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))  # region 1 at roughly (10..20, 10..20)
+
+    # Corrupt the stored per-region mask. Any code path that reads
+    # ``state.region_masks[1]`` during the brush commit would see all-False
+    # and produce a polygon tracing only the stroke footprint.
+    svc.state.region_masks[1] = np.zeros_like(svc.state.region_masks[1])
+
+    svc.set_brush_radius(2)
+    result = _run_brush(svc, [(18, 15), (22, 15), (25, 15)], mode="add")
+    assert result == "added"
+
+    # Rasterize the committed polygon and verify it covers the original
+    # target's interior (e.g. a pixel well inside the square) *and* the
+    # stroke extension (e.g. a pixel past the old right edge). If the
+    # commit had read the corrupted mask, the interior pixels of the
+    # original square would be lost.
+    from bacmask.core import masking
+
+    committed_mask = masking.rasterize_polygon_mask(
+        np.asarray(svc.state.regions[1]["vertices"], dtype=np.int32),
+        svc.state.label_map.shape,
+    )
+    # Pixel firmly inside the original square but outside the stroke.
+    assert committed_mask[12, 12], "original target interior lost → commit read stale mask"
+    # Pixel painted by the stroke past the old right edge (x=22, y=15).
+    assert committed_mask[15, 22], "stroke extension missing from committed polygon"

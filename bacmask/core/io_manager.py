@@ -61,7 +61,7 @@ class AreaRow:
     filename: str
     region_id: int
     region_name: str
-    area_px: int
+    area_px: float  # polygon shoelace area in px² (knowledge/030)
     area_mm2: float | None  # None -> empty cell (uncalibrated)
     scale_factor: float | None  # None -> empty cell (uncalibrated)
 

@@ -55,24 +55,25 @@ def test_csv_schema_header_locked(tmp_path):
 
 
 def test_csv_rows_written_in_order(tmp_path):
+    # area_px is now a float (shoelace of the polygon, knowledge/030).
     rows = [
-        iom.AreaRow("a.tif", 1, "region_01", 100, 1.0, 0.1),
-        iom.AreaRow("a.tif", 2, "region_02", 250, None, None),
+        iom.AreaRow("a.tif", 1, "region_01", 100.0, 1.0, 0.1),
+        iom.AreaRow("a.tif", 2, "region_02", 250.0, None, None),
     ]
     p = tmp_path / "a_areas.csv"
     iom.save_areas_csv(p, rows)
     lines = p.read_text().splitlines()
-    assert lines[1] == "a.tif,1,region_01,100,1.0,0.1"
-    assert lines[2] == "a.tif,2,region_02,250,,"  # uncalibrated -> empties
+    assert lines[1] == "a.tif,1,region_01,100.0,1.0,0.1"
+    assert lines[2] == "a.tif,2,region_02,250.0,,"  # uncalibrated -> empties
 
 
 def test_csv_overwrites_on_resave(tmp_path):
     p = tmp_path / "a.csv"
-    iom.save_areas_csv(p, [iom.AreaRow("x.png", 1, "region_01", 5, None, None)])
-    iom.save_areas_csv(p, [iom.AreaRow("x.png", 1, "region_01", 7, None, None)])
+    iom.save_areas_csv(p, [iom.AreaRow("x.png", 1, "region_01", 5.0, None, None)])
+    iom.save_areas_csv(p, [iom.AreaRow("x.png", 1, "region_01", 7.0, None, None)])
     lines = p.read_text().splitlines()
     assert len(lines) == 2  # header + 1 row (no append)
-    assert lines[1].split(",")[3] == "7"
+    assert lines[1].split(",")[3] == "7.0"
 
 
 # --- Bundle v2 round-trip -----------------------------------------------------
