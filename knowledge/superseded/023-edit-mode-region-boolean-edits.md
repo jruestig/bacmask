@@ -4,18 +4,23 @@ title: Edit Mode & Region Boolean Edits
 tags: [architecture, core, ui]
 created: 2026-04-19
 updated: 2026-04-19
-status: accepted
-related: [002, 003, 013, 014, 025]
+status: superseded
+supersededBy: 026
+related: [002, 003, 013, 014, 025, 026]
 ---
 
-# Edit Mode & Region Boolean Edits
+# Edit Mode & Region Boolean Edits (SUPERSEDED)
+
+> **Superseded by [026 — Brush Edit Model](../026-brush-edit-model.md) (2026-04-19).**
+> Live-UI feedback: the lasso-against-region stroke was too restrictive — users produced strokes that looked correct but committed nothing because the two-boundary-crossing rule was violated (wrong start side, <2 crossings, or drag never entered the region). Replaced by a GIMP-style brush with explicit `Shift` (add) / `Ctrl` (subtract) modifiers. `state.edit_mode`, the `e` hotkey, `find_boundary_crossings`, `rasterize_stroke_polygon`, and `edit_region_stroke` are retired. `RegionEditCommand` is renamed to `BrushStrokeCommand`.
+> The note below is preserved for historical context only — do **not** implement against it.
 
 Replaces the handle-drag / insert-vertex / remove-vertex edit model sketched in the
-first draft of [014 — Lasso Tool](014-lasso-tool.md). Region boundaries are now
+first draft of [014 — Lasso Tool](../014-lasso-tool.md). Region boundaries are now
 refined by drawing a second lasso *against* an existing region — start side decides
 whether the stroke adds to or subtracts from the target.
 
-Regions may overlap after an edit ([025](025-overlapping-regions.md)); there is no
+Regions may overlap after an edit ([025](../025-overlapping-regions.md)); there is no
 clip-at-neighbors rule. Edits are strictly per-target.
 
 ## Why
@@ -23,7 +28,7 @@ clip-at-neighbors rule. Edits are strictly per-target.
 Handle dragging is finicky on dense colony outlines (many short segments, small
 handles, pan/zoom interactions). A lasso-against-region gesture reuses the same
 primitive users already know, needs no handle hit-testing, and composes with
-neighbor-clipping ([021](021-vertex-edit-collision.md)) naturally.
+neighbor-clipping ([021](021-vertex-edit-collision.md), also superseded) naturally.
 
 ## Edit mode toggle
 
@@ -45,7 +50,7 @@ state; not persisted to the bundle.
 - **Double-click** on any region retargets to that region. Double-click on
   background clears the target.
 - Cyan outline marks the current target — the same `selected_region_id` the
-  results panel highlights. One slot, two uses ([002](002-state-management.md)).
+  results panel highlights. One slot, two uses ([002](../002-state-management.md)).
 
 ## Stroke semantics
 
@@ -84,8 +89,8 @@ binary mask (rasterized from its polygon).
 
 No inter-region constraint is applied — other regions' masks are untouched.
 If the target now covers pixels that other regions also cover, those pixels are
-shared ([025](025-overlapping-regions.md)). Overlap resolution happens at mask
-export time ([024](024-mask-export-deferred.md)), not during editing.
+shared ([025](../025-overlapping-regions.md)). Overlap resolution happens at mask
+export time ([024](../024-mask-export-deferred.md)), not during editing.
 
 ## Multi-piece results
 
@@ -127,7 +132,7 @@ are re-derived. Re-editing later remains exact.
 ## Escape / cancel
 
 `Escape` during an in-progress edit stroke discards it. Uses the existing
-`cancel_lasso` action ([016 — Input Abstraction](016-input-abstraction.md)); no
+`cancel_lasso` action ([016 — Input Abstraction](../016-input-abstraction.md)); no
 new action is needed.
 
 ## Leaving edit mode
@@ -140,8 +145,8 @@ highlight. Turning Edit back ON resumes with the same target.
 
 One stroke → one `RegionEditCommand(label_id, old_vertices, new_vertices,
 old_mask_patch)` on the undo stack. Renames the obsolete `VertexEditCommand`.
-See [003](003-undo-redo-commands.md). The patch is stored per the bounding-box
-rule of [004](004-performance-large-images.md).
+See [003](../003-undo-redo-commands.md). The patch is stored per the bounding-box
+rule of [004](../004-performance-large-images.md).
 
 ## Not in MVP
 
@@ -149,16 +154,18 @@ rule of [004](004-performance-large-images.md).
   to be inside the current target. New-region creation still happens only in
   OFF-mode press-drag on background.)
 - Merging two regions into one. Use delete + redraw.
-- Splitting one region into two — see [022](022-region-split-helper.md).
+- Splitting one region into two — see [022](../022-region-split-helper.md).
 
 ## Related
 
-- [014 — Lasso Tool & Boundary Editing](014-lasso-tool.md) — primitive the edit
-  mode reuses.
-- [002 — State Management](002-state-management.md) — target lives in
+- [014 — Lasso Tool](../014-lasso-tool.md) — primitive the edit mode reused.
+- [002 — State Management](../002-state-management.md) — target lives in
   `selected_region_id`; no new state slot.
-- [003 — Undo/Redo Commands](003-undo-redo-commands.md) — `RegionEditCommand`.
-- [013 — Minimal Toolset](013-minimal-toolset.md) — edit is a *mode* of the
-  lasso primitive, not a second tool.
-- [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — invariant
+- [003 — Undo/Redo Commands](../003-undo-redo-commands.md) — `RegionEditCommand`
+  (now renamed `BrushStrokeCommand`).
+- [013 — Minimal Toolset](../013-minimal-toolset.md) — edit is no longer a *mode*
+  of the lasso primitive; the brush ([026](../026-brush-edit-model.md)) is a
+  second tool.
+- [025 — Overlapping Regions Allowed](../025-overlapping-regions.md) — invariant
   change; explains why no clip rule applies.
+- [026 — Brush Edit Model](../026-brush-edit-model.md) — successor.

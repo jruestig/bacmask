@@ -26,11 +26,11 @@ A dedicated tool that slices an existing region across a user-drawn stroke, prod
 - Delete + redraw covers the case today, at some UX cost.
 - Requires non-trivial polygon-cut geometry (Sutherland–Hodgman or similar).
 
-## Contrast with [021 — Clip](021-vertex-edit-collision.md)
+## Contrast with [021 — Clip](superseded/021-vertex-edit-collision.md)
 - Clip is **defensive**: keeps regions from colliding during normal editing.
 - Split is **active**: deliberately cuts one region into two.
 - They don't conflict — both can coexist.
 
 ## Related
 - [014 — Lasso Tool & Boundary Editing](014-lasso-tool.md).
-- [021 — Vertex-Edit Collision Policy](021-vertex-edit-collision.md).
+- [021 — Vertex-Edit Collision Policy](superseded/021-vertex-edit-collision.md).

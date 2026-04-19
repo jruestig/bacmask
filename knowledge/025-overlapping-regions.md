@@ -9,7 +9,7 @@ related: [002, 013, 014, 015, 021, 023, 024]
 
 # Overlapping Regions Allowed
 
-Regions may share pixels. Dropping the disjoint-regions invariant is the central data-model change that makes the add/subtract edit model ([023](023-edit-mode-region-boolean-edits.md)) feel natural, and obsoletes the clip-at-neighbors rule ([021](021-vertex-edit-collision.md)).
+Regions may share pixels. Dropping the disjoint-regions invariant is the central data-model change that makes the add/subtract edit model ([023](superseded/023-edit-mode-region-boolean-edits.md)) feel natural, and obsoletes the clip-at-neighbors rule ([021](superseded/021-vertex-edit-collision.md)).
 
 ## Contract
 
@@ -20,7 +20,7 @@ Regions may share pixels. Dropping the disjoint-regions invariant is the central
 ## Why
 
 - Users naturally draw regions that touch, graze, or stack when lighting / focus / colony growth make boundaries ambiguous. Forcing disjointness required a constant clip rule, which made the editing UI silently steal pixels from neighbors during otherwise-innocent add strokes.
-- The add/subtract stroke model ([023](023-edit-mode-region-boolean-edits.md)) is a per-region operation; inter-region constraints don't belong in it.
+- The add/subtract stroke model ([023](superseded/023-edit-mode-region-boolean-edits.md)) is a per-region operation; inter-region constraints don't belong in it.
 - For training data, the preferred downstream format is a layered stack ([024](024-mask-export-deferred.md)) in which each layer is disjoint by construction. Overlap handling is solved at export time, not during annotation.
 
 ## Consequences
@@ -57,6 +57,6 @@ Raster export is a separate, headless operation ([024](024-mask-export-deferred.
 - [002 — State Management](002-state-management.md) — storage implications.
 - [014 — Lasso Tool & Boundary Editing](014-lasso-tool.md) — primitive that can now create overlapping strokes.
 - [015 — .bacmask Bundle Format](015-bacmask-bundle.md) — polygon-only bundle.
-- [021 — Edit Collision Policy (Clip)](021-vertex-edit-collision.md) — **superseded** by this note.
-- [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md) — add/subtract stroke; no longer clips.
+- [021 — Edit Collision Policy (Clip)](superseded/021-vertex-edit-collision.md) — **superseded** by this note.
+- [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) — add/subtract stroke; no longer clips.
 - [024 — Mask Export (deferred)](024-mask-export-deferred.md) — where overlap is resolved into layered disjoint masks.

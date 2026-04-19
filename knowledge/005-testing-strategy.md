@@ -54,7 +54,7 @@ The separation-of-concerns split earns its keep here.
 - `scale_mm_per_px <= 0` rejected.
 - Missing calibration → `area_px` populated, `area_mm2` + `scale_factor` are empty strings, no crash. See [017](017-calibration-input.md).
 
-### Dimension mismatch on load ([018](018-load-mask-dim-mismatch.md))
+### Dimension mismatch on load ([018](superseded/018-load-mask-dim-mismatch.md))
 - Mismatch triggers the service-level prompt; default action rejects.
 - Resize path (non-default) uses `INTER_NEAREST`; logs a `WARNING`.
 
@@ -71,5 +71,5 @@ The separation-of-concerns split earns its keep here.
 - [014 — Lasso Tool](014-lasso-tool.md).
 - [015 — .bacmask Bundle](015-bacmask-bundle.md).
 - [017 — Calibration Input](017-calibration-input.md).
-- [018 — Load Mask Dimension Mismatch](018-load-mask-dim-mismatch.md).
+- [018 — Load Mask Dimension Mismatch](superseded/018-load-mask-dim-mismatch.md).
 - [019 — Dev Tooling](019-dev-tooling.md).

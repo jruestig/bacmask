@@ -16,7 +16,7 @@ Not optional. Designed in from MVP day one.
 Each structural mutation is a **Command object** in `bacmask/core/commands.py`:
 
 - `LassoCloseCommand(vertices, assigned_label_id)` — adds a new region.
-- `RegionEditCommand(label_id, old_vertices, new_vertices, old_mask_patch)` — modifies an existing region via an add/subtract stroke ([023](023-edit-mode-region-boolean-edits.md)). Replaces the earlier `VertexEditCommand`.
+- `RegionEditCommand(label_id, old_vertices, new_vertices, old_mask_patch)` — modifies an existing region via an add/subtract stroke ([023](superseded/023-edit-mode-region-boolean-edits.md)). Replaces the earlier `VertexEditCommand`.
 - `DeleteRegionCommand(label_id, mask_patch, vertices, name)` — removes a region; stores mask patch + vertices for undo.
 
 All commands implement `apply(state)` and `undo(state)`.

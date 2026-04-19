@@ -73,7 +73,7 @@ project.bacmask/
 ## Why a bundle
 - **Self-contained session.** Share one file; recipient resumes editing.
 - **Deterministic reload.** `image + meta` covers everything.
-- **Vertex preservation** for the add/subtract edit model ([023](023-edit-mode-region-boolean-edits.md)). Raster-only storage loses edit fidelity.
+- **Vertex preservation** for the add/subtract edit model ([023](superseded/023-edit-mode-region-boolean-edits.md)). Raster-only storage loses edit fidelity.
 
 ## Why ZIP (not a custom binary)
 - Cross-platform, stdlib-only.

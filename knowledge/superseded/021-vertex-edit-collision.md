@@ -10,7 +10,7 @@ related: [014, 022, 023, 025]
 
 # Edit Collision Policy: Clip (superseded)
 
-> **Superseded by [025 — Overlapping Regions Allowed](025-overlapping-regions.md)** and the revised edit model in [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md).
+> **Superseded by [025 — Overlapping Regions Allowed](../025-overlapping-regions.md)** and the revised edit model in [026 — Brush Edit Model](../026-brush-edit-model.md) (which itself superseded [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md)).
 > The disjoint-regions invariant has been dropped. Add-strokes no longer clip at neighbors; shared pixels are allowed. This note is retained for the reasoning trail.
 
 ## Decision (historical)
@@ -46,9 +46,9 @@ Pixels owned by other regions are untouched. Adjacent regions keep their territo
 ## Implementation notes
 - Clip requires one additional `uint16` mask slice in the bbox region — negligible memory cost.
 - Self-overlap within the same stroke polygon still rasterizes per `cv2.fillPoly`'s even-odd rule. Clip only affects inter-region overlap.
-- Bounding box must be the **union of old target pixels and proposed new pixels**, clamped to image bounds, so both the clear-old and fill-new operations are bounded per [004](004-performance-large-images.md).
+- Bounding box must be the **union of old target pixels and proposed new pixels**, clamped to image bounds, so both the clear-old and fill-new operations are bounded per [004](../004-performance-large-images.md).
 
 ## Related
-- [014 — Lasso Tool & Boundary Editing](014-lasso-tool.md) — where editing is introduced.
-- [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md) — the add/subtract stroke model that invokes this clip rule.
-- [022 — Region Split Helper](022-region-split-helper.md) — post-MVP way to actively cut a region (different semantics from clip).
+- [014 — Lasso Tool](../014-lasso-tool.md) — where editing is introduced.
+- [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md) — the add/subtract stroke model that once invoked this clip rule (also superseded).
+- [022 — Region Split Helper](../022-region-split-helper.md) — post-MVP way to actively cut a region (different semantics from clip).

@@ -27,7 +27,7 @@ See [knowledge/000 — Project Overview](knowledge/000-project-overview.md) for 
 - **Image Processing:** OpenCV (`opencv-python-headless`) + NumPy.
 - **Save Format:** `.bacmask` ZIP bundle — see [knowledge/015](knowledge/015-bacmask-bundle.md).
 - **Sibling CSV** for areas — see [knowledge/011](knowledge/011-csv-for-area-output.md).
-- **Mask Storage:** 16-bit grayscale PNG label map inside the bundle — see [knowledge/012](knowledge/012-png-label-maps.md).
+- **Mask Storage:** masks are no longer persisted — polygons are canonical ([knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/025](knowledge/025-overlapping-regions.md)). Historical PNG label-map rationale: [knowledge/superseded/012](knowledge/superseded/012-png-label-maps.md).
 - **Formatter/Linter:** `ruff`. See [knowledge/019 — Dev Tooling](knowledge/019-dev-tooling.md).
 
 ## Architecture
@@ -45,9 +45,12 @@ knowledge base. Start here:
 - [knowledge/006 — Configuration Management](knowledge/006-configuration-management.md)
 - [knowledge/007 — Logging](knowledge/007-logging.md)
 - [knowledge/016 — Input Abstraction Layer](knowledge/016-input-abstraction.md)
-- [knowledge/023 — Edit Mode & Region Boolean Edits](knowledge/023-edit-mode-region-boolean-edits.md)
+- [knowledge/superseded/023 — Edit Mode & Region Boolean Edits](knowledge/superseded/023-edit-mode-region-boolean-edits.md) *(superseded by 026)*
 - [knowledge/024 — Mask Export (deferred, Python-only)](knowledge/024-mask-export-deferred.md)
 - [knowledge/025 — Overlapping Regions Allowed](knowledge/025-overlapping-regions.md)
+- [knowledge/026 — Brush Edit Model (Shift add / Ctrl subtract)](knowledge/026-brush-edit-model.md)
+- [knowledge/027 — Toolbar Hotkey Labels](knowledge/027-toolbar-hotkey-labels.md)
+- [knowledge/028 — File Picker Double-Click to Open](knowledge/028-file-picker-double-click.md)
 
 ## Core Concepts (contracts)
 
@@ -101,24 +104,23 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
    - **Masks remain visible at all times.** They are never auto-hidden or cleared.
      The user must explicitly clear or delete them.
 
-2. **Masking Tools (exactly one primitive — see [knowledge/013](knowledge/013-minimal-toolset.md), [knowledge/014](knowledge/014-lasso-tool.md)):**
-   - **Lasso:** press-drag to trace the outline of a region. On close, the interior is
-     filled with the next free label ID.
-     - Close on pointer release — the last captured point is joined to the first.
-     - Keyboard close: `Enter` is an equivalent explicit-close trigger (e.g. for stylus loss-of-contact).
+2. **Masking Tools (two primitives — see [knowledge/013](knowledge/013-minimal-toolset.md)):**
+   - **Lasso (`L`)** — creates new regions ([knowledge/014](knowledge/014-lasso-tool.md)). Press-drag to trace an outline; release to close. The stored polygon is re-derived from the rasterized stroke via `largest_connected_component` + `findContours` so the shape is always a clean simple closed curve (no random closing chord).
+     - Keyboard close: `Enter` (equivalent trigger for stylus loss-of-contact).
      - Cancel in-progress lasso: `Escape`.
-     - Lassos with fewer than 3 points are silently discarded on close (no region, no history entry).
-   - **Region editing (add/subtract):** toggle **Edit mode** (toolbar button or `e`).
-     Pick a target region (single click when none set; double-click to retarget).
-     Press-drag starts an edit stroke on the current target:
-     - Start **inside** the target → stroke's outside lobe is **added** to the region.
-     - Start **outside** the target → stroke's inside cut is **subtracted**.
-     First two boundary crossings define the splice; extras ignored. Multi-piece result
-     keeps the largest connected component (tie: smallest-`(y, x)` pixel). Overlap
-     with other regions is allowed — edits are strictly per-target ([knowledge/025](knowledge/025-overlapping-regions.md)).
-     Full semantics in [knowledge/023](knowledge/023-edit-mode-region-boolean-edits.md).
-   - **Delete region:** select region → `Delete` key or toolbar button. Label ID is NOT re-used.
-   - No brush, no eraser, no flood fill, no threshold, no smart-select.
+     - Lassos with fewer than 3 points or zero enclosed area are silently discarded.
+   - **Brush (`B`)** — edits existing regions ([knowledge/026](knowledge/026-brush-edit-model.md)). Select the brush tool, then press-drag on a region:
+     - Default or **`Shift`** held → **add** paint into the region under the press-down point.
+     - **`Ctrl`** held → **subtract** paint from that region.
+     - The target is locked at press-down — dragging across other regions does not re-target.
+     - Press-down on background = no-op. The brush cannot create new regions.
+     - If `Ctrl` empties the region entirely, the edit resolves as a Delete.
+     - Overlap with other regions is allowed — edits are strictly per-target ([knowledge/025](knowledge/025-overlapping-regions.md)).
+     - Brush radius is a session-local scalar in a toolbar numeric field (default 8 px, image-space).
+   - **Delete region (`Delete` / `Backspace`):** select region → delete key or toolbar button. Label ID is NOT re-used.
+   - No eraser tool (use `Ctrl`-brush), no flood fill, no threshold, no smart-select.
+
+   Every toolbar button displays its keyboard shortcut in its label ([knowledge/027](knowledge/027-toolbar-hotkey-labels.md)).
 
 3. **Results Panel:**
    - Scrollable table showing: Region ID | Name | Area (px) | Area (mm²)
@@ -126,11 +128,10 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
    - Full set of regions always visible — do not paginate or truncate.
 
 4. **File Operations:**
-   - **Load Image:** file picker, accepts common formats (PNG, JPG, TIFF, BMP).
-     File upload only — no camera, no URL.
-   - **Load Bundle:** `.bacmask` → restore image + polygons + scale. Rasterization happens in memory from polygons; no in-bundle mask to reconcile.
-   - **Save:** writes only the `.bacmask` bundle.
-   - **Export:** writes only the areas CSV. Separate button from Save.
+   - **Load Image (`Ctrl+O`):** file picker, accepts common formats (PNG, JPG, TIFF, BMP). File upload only — no camera, no URL. Double-click on a file in the picker opens it ([knowledge/028](knowledge/028-file-picker-double-click.md)).
+   - **Load Bundle:** `.bacmask` → restore image + polygons + scale. Rasterization happens in memory from polygons; no in-bundle mask to reconcile. Double-click opens, same as Load Image.
+   - **Save (`Ctrl+S`):** writes only the `.bacmask` bundle.
+   - **Export CSV (`Ctrl+E`):** writes only the areas CSV. Separate button from Save.
 
 5. **Input abstraction:**
    - All gestures go through a semantic input layer so desktop↔touch profiles can be swapped
@@ -139,11 +140,13 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
 ## Key Behavioral Rules
 
 - **DO NOT** build any image editing features (brightness, contrast, crop, rotate, filters).
-- **DO NOT** build brush / eraser / flood fill / threshold / magic-select tools — lasso is the only primitive.
+- **DO NOT** build flood fill, threshold, or magic-select tools. The two primitives are lasso (create) and brush (edit) — nothing else.
+- **DO NOT** let the brush create regions. Press-down on background must be a no-op. New-region creation is the lasso's exclusive job ([knowledge/026](knowledge/026-brush-edit-model.md)).
 - **DO NOT** auto-close, auto-hide, or reset masks after saving. Masks stay on the canvas
   until the user explicitly clears them or loads a new image.
 - **DO NOT** re-use a region's label ID after deletion. Monotonic IDs only.
 - **DO NOT** add features beyond masking and area measurement. This tool has one job.
+- **DO NOT** hide keyboard shortcuts behind a help overlay — every shortcut must appear in its button's label ([knowledge/027](knowledge/027-toolbar-hotkey-labels.md)).
 - **DO** keep the UI minimal and focused. Every element serves the
   trace → label → measure → save workflow.
 - **DO** ensure persistence is deterministic — same polygons + same creation order = bit-identical bundle (`meta.json` + `image.<ext>`) and exported CSV. Same contract applies to the deferred mask export ([knowledge/024](knowledge/024-mask-export-deferred.md)) when implemented.
@@ -186,16 +189,17 @@ No other dependencies. Keep it lean.
 
 - [ ] User can load an image from disk via file picker (shown in original color).
 - [ ] User can input a scale factor (mm per pixel); empty = uncalibrated.
-- [ ] User can trace a closed boundary around a colony with the lasso tool (release to close; `Enter` as equivalent explicit trigger).
-- [ ] User can edit an existing region's boundary via add/subtract strokes in Edit mode. Overlap with other regions is allowed.
-- [ ] User can delete a region; its label ID is not re-used.
+- [ ] User can trace a closed boundary around a colony with the lasso tool (release to close; `Enter` as equivalent explicit trigger). Stored polygon is the cleaned raster contour, not the raw scribble.
+- [ ] User can edit an existing region's boundary with the brush tool — `Shift` adds paint, `Ctrl` subtracts. Brush only touches the region under the press-down point. Overlap with other regions is allowed.
+- [ ] User can delete a region; its label ID is not re-used. `Ctrl`-brush that empties a region resolves as a Delete.
 - [ ] All region areas (px and mm²) are displayed in a results panel, updating live.
 - [ ] Masks persist on the canvas — they never auto-disappear.
 - [ ] **Save** writes `<image_stem>.bacmask` (bundle only, no mask, no CSV).
 - [ ] **Export** writes `<image_stem>_areas.csv` (CSV only).
-- [ ] Bundle can be reloaded for a given image and restores regions + scale + IDs exactly (polygons canonical).
+- [ ] Bundle can be reloaded for a given image and restores regions + scale + IDs exactly (polygons canonical). Double-click on a file in the picker opens it.
 - [ ] CSV is directly human-readable with the locked column schema.
-- [ ] Undo / redo works for lasso close, region edit, and delete, with a bounded history.
+- [ ] Undo / redo works for lasso close, brush stroke, and delete, with a bounded history.
+- [ ] Every toolbar button label includes its keyboard shortcut.
 - [ ] App runs on Linux and Windows.
 - [ ] Unit tests pass for core logic (rasterization, area, bundle I/O, CSV, undo/redo, calibration).
 - [ ] `ruff check` and `ruff format --check` pass.

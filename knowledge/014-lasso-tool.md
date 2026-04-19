@@ -1,16 +1,16 @@
 ---
 id: 014
-title: Lasso Tool & Boundary Editing
+title: Lasso Tool (region creation)
 tags: [architecture, core, ui]
 created: 2026-04-17
 updated: 2026-04-19
 status: accepted
-related: [002, 003, 013, 015, 016, 022, 023, 025]
+related: [002, 003, 013, 015, 016, 022, 025, 026]
 ---
 
-# Lasso Tool & Boundary Editing
+# Lasso Tool (region creation)
 
-Primary (and only) mask-editing primitive in MVP. Replaces the brush/eraser/flood list from earlier drafts of [013 — Minimal Toolset](013-minimal-toolset.md).
+One of two mask primitives in MVP ([013](013-minimal-toolset.md)). The lasso **creates** new regions. Editing an existing region's boundary is the job of the brush ([026](026-brush-edit-model.md)) — this note no longer covers that flow.
 
 ## Draw flow
 1. User press-drags to trace an outline. While dragging, the polyline renders on the overlay (not yet in the label map).
@@ -22,18 +22,19 @@ Primary (and only) mask-editing primitive in MVP. Replaces the brush/eraser/floo
 - Vertex coordinates are captured in display space, mapped to full-res space before the rasterization command runs ([004](004-performance-large-images.md)).
 - `LASSO_CLOSE_THRESHOLD_PX` (default 10 px) remains in `config/defaults.py` as a reserved knob for a future "snap to start on proximity" preview affordance. It is **not** used as a close trigger in MVP — release is the trigger. Do not wire it in without revisiting this note.
 
-## Edit flow (region boolean edits)
-Boundary refinement happens in **Edit mode**. The user toggles it on (toolbar button / `e` hotkey), picks a target region, and draws a second lasso *against* that region. The start side decides add vs. subtract:
+## Canonical vertex cleanup
+On close, the raw stroke polygon is passed through `largest_connected_component` + `cv2.findContours(RETR_EXTERNAL, CHAIN_APPROX_NONE)` before being stored. The result:
 
-- Stroke starts **inside** target → the outside lobe is **added** to the region.
-- Stroke starts **outside** target → the inside cut is **subtracted**.
+- Self-intersecting strokes commit only their largest lobe.
+- The "implicit closing chord" from the user's release point back to the start is dissolved — the stored polygon traces the filled region's real outer boundary, not the raw scribble.
+- Every stored vertex sits on the rasterized mask's edge, so the selected-region cyan outline is always a clean closed curve.
 
-Full semantics (boundary-crossing detection, multi-piece tie-break, discard rules, canonical vertex re-derivation) live in [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md). That note supersedes the handle-drag / insert-vertex / remove-vertex model sketched in earlier drafts of this file.
+Live-UI feedback that landed this pass: pre-cleanup, releasing away from the start produced visually surprising filled shapes. The raster-then-recontour pipeline reliably kills that.
 
-Area updates live as the mask changes — same as for the initial draw. (CSV is produced by the separate Export action, not by edits.)
+## Editing created regions
+Not done here. Boundary refinement is the **brush** tool's job — see [026 — Brush Edit Model](026-brush-edit-model.md). The brush handles add (`Shift`-drag) and subtract (`Ctrl`-drag) on an existing region. Overlap with other regions is allowed ([025](025-overlapping-regions.md)); no clipping.
 
-### Collision with other regions
-**Overlap is allowed** ([025](025-overlapping-regions.md)). An add-stroke can grow the target into pixels that other regions also claim; those pixels then belong to both. No clipping, no pixel theft. Overlap is resolved deterministically at mask-export time ([024](024-mask-export-deferred.md)), not during editing.
+Area recomputes live as regions change, same as on initial draw. (CSV is produced by the separate Export action, not by edits.)
 
 ## Delete region
 - Select region → invoke delete (toolbar button or `Delete` key).
@@ -50,13 +51,13 @@ Area updates live as the mask changes — same as for the initial draw. (CSV is 
 - The **per-region vertex list** is persisted in the bundle's `meta.json` ([015](015-bacmask-bundle.md)). Without it, vertex editing after reload would require polygon recovery from the raster mask — lossy and imprecise.
 
 ## Commands (see [003](003-undo-redo-commands.md))
-- `LassoCloseCommand(vertices, assigned_label_id)` — add region.
-- `RegionEditCommand(label_id, old_vertices, new_vertices, old_mask_patch)` — modify boundary via an add/subtract stroke ([023](023-edit-mode-region-boolean-edits.md)).
+- `LassoCloseCommand(vertices, region_mask=clean_mask)` — add region. `region_mask` is the pre-cleaned bool mask; when present, apply uses it directly instead of re-rasterizing the vertices (avoids pixel drift on round-trip).
+- `BrushStrokeCommand(label_id, new_vertices, new_region_mask)` — modify boundary via a brush stroke ([026](026-brush-edit-model.md)).
 - `DeleteRegionCommand(label_id, mask_patch, vertices, name)` — remove region; retains patch + vertices for undo.
 
 ## Granularity
 - One lasso press→close = one command.
-- One edit stroke press→release = one command.
+- One brush stroke press→release = one command.
 - One delete = one command.
 
 ## Cancelling an in-progress lasso
@@ -73,5 +74,5 @@ Area updates live as the mask changes — same as for the initial draw. (CSV is 
 - [003 — Undo/Redo](003-undo-redo-commands.md) — command structure.
 - [015 — .bacmask Bundle](015-bacmask-bundle.md) — where vertex data persists.
 - [016 — Input Abstraction Layer](016-input-abstraction.md) — gesture delivery.
-- [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md) — full spec of the add/subtract stroke model.
+- [026 — Brush Edit Model](026-brush-edit-model.md) — the editing tool (replaces the old edit-mode stroke).
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — invariant change; no clip rule.

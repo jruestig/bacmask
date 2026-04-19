@@ -1,12 +1,12 @@
-# Status — 2026-04-19 (session 3 update)
+# Status — 2026-04-19 (session 4 update)
 
 Session-handoff doc. Updated at the end of each working session. What follows `knowledge/` conventions — kept short on purpose.
 
 ## Currently working on
-- Nothing in flight at end of session. First live UI smoke pass done — a few small fit-and-finish items found and fixed below.
+- Nothing in flight at end of session 4. Rendering perf, lasso close cleanup, and the editing-model spec pivot all landed this session.
 
 ## In progress (started, not done)
-- Nothing half-done.
+- **Brush implementation.** Spec is locked in [026](026-brush-edit-model.md) but code still reflects [023](superseded/023-edit-mode-region-boolean-edits.md): `state.edit_mode`, the `e` hotkey, `find_boundary_crossings`, `rasterize_stroke_polygon`, `edit_region_stroke`, `RegionEditCommand`, and the edit-mode toolbar button are all still present. Next session: implement [026](026-brush-edit-model.md) and tear these out in the same pass.
 
 ## Blocked (waiting on external input or deferred decisions)
 - **Mask export output location + CLI.** User wants to pick `out_dir` and a CLI wrapper "later." Format contract is locked ([024](024-mask-export-deferred.md)); placement and ergonomics deferred.
@@ -14,16 +14,21 @@ Session-handoff doc. Updated at the end of each working session. What follows `k
 - **macOS validation.** Not an MVP target, intentionally deferred ([020](020-platform-scope.md)).
 
 ## Next actions (concrete, ordered)
-1. **More live-UI passes.** Keep exercising real images. Known polish candidates:
-   - Distinct color/style for the edit-stroke preview (green for add, red for subtract) once mode can be inferred client-side.
-   - Click feedback or row highlight when selecting via canvas tap.
-2. **Windows smoke test.** Needs a Windows box.
-3. **Mask export** (`bacmask/services/mask_export.py`). Headless `export_masks(bundle_path, out_dir)` per [024](024-mask-export-deferred.md). Not UI-wired. Deferred until someone has a concrete training pipeline to consume the layered `.npy` output.
-4. **CLI wrapper for mask export** + user-chosen `out_dir`. After item 3.
-5. **Region rename.** Users can't change `region_01` / `region_02` names today. Add an inline edit in the results panel. Post-MVP.
-6. **Numeric input polish** — calibration field accepts units other than mm/px? Not in spec, ignore for now.
+1. **Implement brush tool** per [026](026-brush-edit-model.md). New `BrushStrokeCommand` (rename of `RegionEditCommand`); `MaskService.apply_brush_stroke(label_id, stamp_mask, mode)`; canvas wires brush press-drag with modifier capture at press-down; live preview ghost of the stamp mask; cursor circle tints green/red by modifier state. Press-down also sets `state.selected_region_id` to the resolved brush target (unifies selection highlight with brush target). Tool-switch mid-stroke: in-progress stroke keeps running on the tool it was started with; switch takes effect on next press-down. Delete: old `edit_region_stroke`, `find_boundary_crossings`, `rasterize_stroke_polygon`, `state.edit_mode`, `set_edit_mode` / `toggle_edit_mode`, `e` hotkey (freed, not rebound), edit-mode toolbar button, `tests/ui/test_image_canvas_edit.py`.
+2. **Tool selector in toolbar** — replace the edit-mode toggle with a two-button tool selector (Lasso / Brush). Session state gains `active_tool: Literal["lasso", "brush"]` (default `"lasso"`). `L` and `B` hotkeys.
+3. **Brush size popover.** Slider `[1, 100]`, default 8. Opens on click of the Brush toolbar button (activates brush + opens in one shot when the tool isn't active; opens alone when it already is). Closes on outside-click or Escape.
+4. **Toolbar hotkey labels** per [027](027-toolbar-hotkey-labels.md). Helper: `keybinding_for_action(name) → "Ctrl+S"`. Apply to every existing button.
+5. **Double-click to open in file picker** per [028](028-file-picker-double-click.md). Bind `on_submit` on the Kivy FileChooser to the load callback.
+6. **Mask export** (`bacmask/services/mask_export.py`). Headless, deferred until a consuming training pipeline is chosen.
+7. **Region rename.** Users can't change `region_01` / `region_02` names today. Inline edit in the results panel. Post-MVP.
 
 ## Recently completed (last ~3 sessions)
+- **Rendering perf pass (session 4).**
+  - `SessionState.regions_version` — monotonic counter bumped by every region-mutating command and by `load_bundle`/`set_image`. Canvas gates overlay-texture rebuild on it. Selection / mode / calibration notifies no longer rebuild the full-res RGBA composite.
+  - `state.active_lasso` now holds the growing list reference during drag — no more per-sample `np.asarray(full_list)`. Only converted to ndarray at close.
+  - `_image_points_to_widget` vectorized with numpy (single `fit_to_widget` call, vectorized scale+offset, interleave). Long lasso strokes no longer pay a Python-loop cost per `PointerMove`.
+- **Lasso close cleanup (session 4).** `close_lasso` now rasterizes the raw stroke → `largest_connected_component` → `contour_vertices` before committing. Stored polygon is the filled region's real outer boundary — the "random closing chord on release" the user flagged is dissolved. `LassoCloseCommand` gained an optional `region_mask` field so the command uses the pre-cleaned mask directly instead of re-rasterizing the vertices (avoids pixel drift on round-trip). Suite: 172 → 173 (new test verifies every stored vertex sits on the rasterized mask boundary). Ruff + format clean.
+- **Editing model pivot (session 4, spec only — no code yet).** Live-UI feedback showed [023](superseded/023-edit-mode-region-boolean-edits.md)'s lasso-against-region stroke was too restrictive — users produced strokes that looked correct but silently discarded (two-crossings rule). Superseded by [026 — Brush Edit Model](026-brush-edit-model.md): GIMP-style brush with `Shift` (add) / `Ctrl` (subtract) modifiers, target locked at press-down, no edit-mode toggle. New notes this session: [026](026-brush-edit-model.md), [027 — Toolbar Hotkey Labels](027-toolbar-hotkey-labels.md), [028 — File Picker Double-Click](028-file-picker-double-click.md). 013, 014, README, CLAUDE.md updated to match.
 - **Live UI polish (session 3).**
   - **Zoomed image no longer covers toolbar/calibration.** Added a Kivy stencil in `ImageCanvas._repaint`. Rectangle extends very far in x (both sides) and downward, but caps at `self.top` — toolbar + calibration above stay visible; image can still bleed horizontally into the results panel on the right and downward (matching pre-stencil behavior the user prefers).
   - **Results panel stays on the right.** Brief detour moving it above the canvas; reverted. Layout is unchanged from pre-session: toolbar → calibration → body (canvas left, results 30% right).
@@ -43,6 +48,6 @@ Session-handoff doc. Updated at the end of each working session. What follows `k
 - **Canvas click-select.** `ImageCanvas._on_input` routes PointerDown through `_region_at`: labeled pixel → `select_region`; background → `clear_selection` + `begin_lasso`. PointerMove ignored when no lasso is active.
 - **Knowledge base overhaul.**
   - Lasso close trigger finalized: pointer-release is MVP; `Enter` is an equivalent explicit-close trigger. ε-proximity auto-close reserved for later. ([014](014-lasso-tool.md), [009](009-deviations-from-claudemd.md) Round 3)
-  - Edit-mode add/subtract stroke model specced. New note [023](023-edit-mode-region-boolean-edits.md). `VertexEditCommand` → `RegionEditCommand`. ([014](014-lasso-tool.md), [003](003-undo-redo-commands.md), [009](009-deviations-from-claudemd.md) Round 4)
-  - Overlap allowed; clip rule dropped. New notes [024](024-mask-export-deferred.md), [025](025-overlapping-regions.md). Superseded: [012](012-png-label-maps.md), [018](018-load-mask-dim-mismatch.md), [021](021-vertex-edit-collision.md). Bundle v2 rewritten ([015](015-bacmask-bundle.md)). State model updated to polygons-canonical ([002](002-state-management.md)). ([009](009-deviations-from-claudemd.md) Round 5)
+  - Edit-mode add/subtract stroke model specced. New note [023](superseded/023-edit-mode-region-boolean-edits.md). `VertexEditCommand` → `RegionEditCommand`. ([014](014-lasso-tool.md), [003](003-undo-redo-commands.md), [009](009-deviations-from-claudemd.md) Round 4)
+  - Overlap allowed; clip rule dropped. New notes [024](024-mask-export-deferred.md), [025](025-overlapping-regions.md). Superseded: [012](superseded/012-png-label-maps.md), [018](superseded/018-load-mask-dim-mismatch.md), [021](superseded/021-vertex-edit-collision.md). Bundle v2 rewritten ([015](015-bacmask-bundle.md)). State model updated to polygons-canonical ([002](002-state-management.md)). ([009](009-deviations-from-claudemd.md) Round 5)
   - `CLAUDE.md` rewritten: §Core Concepts §Masks, §Save vs. Export, §Masking Tools, §File Operations, §Key Behavioral Rules, §Definition of Done.

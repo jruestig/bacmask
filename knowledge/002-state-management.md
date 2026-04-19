@@ -24,14 +24,14 @@ Single source of truth for the annotation session. No state scattered across UI 
 - `scale_mm_per_px`: `float | None`. `None` until calibrated. See [017](017-calibration-input.md).
 - `view`: pan offset + zoom level (display-only state, not persisted).
 - `active_lasso`: live in-progress polyline vertices, or `None`. Cleared on close or cancel. Used for both new-region and edit strokes — the distinction is inferred from `edit_mode` + `selected_region_id` at press-down, not stored on the lasso itself.
-- `edit_mode`: bool. `True` when the Edit toggle is on ([023](023-edit-mode-region-boolean-edits.md)). Session-local; not persisted.
+- `edit_mode`: bool. `True` when the Edit toggle is on ([023](superseded/023-edit-mode-region-boolean-edits.md)). Session-local; not persisted.
 - `selected_region_id`: int or `None`. Doubles as the *edit target* when `edit_mode` is on. One slot, two uses — the results-panel highlight and the cyan outline track it.
 - `dirty`: bool. True when unsaved structural mutations exist.
 
 ## Derived state (not persisted)
 Mask representations are computed from `regions`, cached for performance, and invalidated on any polygon mutation. They are **never** written to disk by Save — masks leave the system only via the deferred export ([024](024-mask-export-deferred.md)).
 
-- `region_masks: dict[int, np.ndarray]` — one `bool` array `(H, W)` per region, rasterized from its polygon. Authoritative for hit-testing, area computation, and the edit-mode "inside" check ([023](023-edit-mode-region-boolean-edits.md)).
+- `region_masks: dict[int, np.ndarray]` — one `bool` array `(H, W)` per region, rasterized from its polygon. Authoritative for hit-testing, area computation, and the edit-mode "inside" check ([023](superseded/023-edit-mode-region-boolean-edits.md)).
 - `label_map_cache: np.ndarray | None` — `uint16` `(H, W)` display cache, populated by painting each region's pixels in ascending `label_id` order so the highest `label_id` wins on overlapping pixels. Used only for rendering and click-select tiebreak ([025](025-overlapping-regions.md)). Never the source of truth; always regeneratable from `region_masks`.
 
 Regeneration granularity:
@@ -53,5 +53,5 @@ Without this, state leaks into widget attributes, save detection breaks, undo/re
 - [014 — Lasso Tool](014-lasso-tool.md) — consumer of `active_lasso` and `regions`.
 - [015 — .bacmask Bundle](015-bacmask-bundle.md) — persistence of `next_label_id`, `regions`, scale.
 - [017 — Calibration Input](017-calibration-input.md) — `scale_mm_per_px`.
-- [023 — Edit Mode](023-edit-mode-region-boolean-edits.md) — consumer of `edit_mode` + `selected_region_id`-as-target.
+- [023 — Edit Mode](superseded/023-edit-mode-region-boolean-edits.md) — consumer of `edit_mode` + `selected_region_id`-as-target.
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — polygons canonical; derived masks may overlap.

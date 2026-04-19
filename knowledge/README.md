@@ -43,24 +43,31 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Conversatio
 ### Technology & format choices (2026-04-17)
 - [010 — Kivy over BeeWare](010-kivy-over-beeware.md)
 - [011 — CSV for Area Output](011-csv-for-area-output.md)
-- [012 — 16-bit PNG Label Maps](012-png-label-maps.md) *(superseded by 024 + 025)*
 - [013 — Minimal Toolset (MVP scope lock)](013-minimal-toolset.md)
 
 ### Product behavior & scope (2026-04-17)
-- [014 — Lasso Tool & Boundary Editing](014-lasso-tool.md)
+- [014 — Lasso Tool (region creation)](014-lasso-tool.md)
 - [015 — .bacmask Bundle Format](015-bacmask-bundle.md)
 - [016 — Input Abstraction Layer](016-input-abstraction.md)
 - [017 — Calibration Input Model](017-calibration-input.md)
-- [018 — Load Mask Dimension Mismatch](018-load-mask-dim-mismatch.md) *(superseded by 015 + 025)*
 - [019 — Development Tooling](019-dev-tooling.md)
 - [020 — Platform Scope (Desktop-First MVP)](020-platform-scope.md)
-- [021 — Edit Collision Policy (Clip)](021-vertex-edit-collision.md) *(superseded by 025)*
 - [022 — Region Split Helper (proposed, post-MVP)](022-region-split-helper.md)
 
 ### Product behavior & scope (2026-04-19)
-- [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md)
 - [024 — Mask Export (deferred, Python-only)](024-mask-export-deferred.md)
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md)
+- [026 — Brush Edit Model (Shift add / Ctrl subtract)](026-brush-edit-model.md)
+- [027 — Toolbar Hotkey Labels](027-toolbar-hotkey-labels.md)
+- [028 — File Picker Double-Click to Open](028-file-picker-double-click.md)
+
+### Superseded (archived in [`superseded/`](superseded/))
+Retired decisions kept for reasoning trails and decision-record context. Do **not** implement against these — each carries a banner pointing to its replacement.
+
+- [012 — 16-bit PNG Label Maps](superseded/012-png-label-maps.md) — superseded by 015 + 024 + 025. Masks are no longer persisted; polygons are canonical.
+- [018 — Load Mask Dimension Mismatch](superseded/018-load-mask-dim-mismatch.md) — superseded by 015 + 025. No in-bundle mask to dimension-check.
+- [021 — Edit Collision Policy (Clip)](superseded/021-vertex-edit-collision.md) — superseded by 025. Overlap is allowed; no clip rule.
+- [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) — superseded by 026. Brush replaces the lasso-against-region stroke.
 
 ## Tags
 - `architecture` — structural decisions

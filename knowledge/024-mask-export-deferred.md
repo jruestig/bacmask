@@ -103,5 +103,5 @@ All of these are straightforward additions on top of the pure function when the 
 ## Related
 - [015 — .bacmask Bundle Format](015-bacmask-bundle.md) — bundle is the exporter's input.
 - [002 — State Management](002-state-management.md) — polygons canonical.
-- [023 — Edit Mode & Region Boolean Edits](023-edit-mode-region-boolean-edits.md) — the editing model that allows overlaps.
-- [012 — 16-bit PNG Label Maps](012-png-label-maps.md) — superseded; explains why PNG was the original choice and why `.npy` is better for the deferred, headless use case.
+- [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) — the editing model that allows overlaps.
+- [012 — 16-bit PNG Label Maps](superseded/012-png-label-maps.md) — superseded; explains why PNG was the original choice and why `.npy` is better for the deferred, headless use case.
