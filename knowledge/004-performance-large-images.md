@@ -4,7 +4,7 @@ title: Performance on Large Images
 tags: [perf, core, ui]
 created: 2026-04-17
 status: accepted
-related: [003, 008, 014, 020]
+related: [003, 008, 014, 020, 029]
 ---
 
 # Performance on Large Images
@@ -23,6 +23,7 @@ Microscopy TIFFs in `images/` are ~20 MB with dimensions in the thousands per si
 - A lasso close or vertex edit touches a bounding box, not the whole image.
 - Re-render only the changed region of the mask overlay texture — not the entire canvas.
 - Undo/redo command patches are bounded by the same bounding box ([003](003-undo-redo-commands.md)).
+- Implementation: [029 — Incremental Overlay Compositor + Per-Region Area Cache](029-incremental-overlay-and-area-cache.md) lays out the bbox-scoped label map repaint, persistent overlay accumulator, and `region_areas` cache that turn every edit path into O(bbox) rather than O(N·H·W). That note also lists future moves (sparse masks, bbox cache, ref-not-copy undo) if region counts keep climbing.
 
 ### 3. NumPy / OpenCV only
 - All pixel operations vectorized. No Python `for y in range(h): for x in range(w):` loops.
@@ -38,3 +39,4 @@ Microscopy TIFFs in `images/` are ~20 MB with dimensions in the thousands per si
 - [008 — Directory Layout](008-directory-layout.md) — `utils/image_utils.py`.
 - [014 — Lasso Tool](014-lasso-tool.md).
 - [020 — Platform Scope](020-platform-scope.md).
+- [029 — Incremental Overlay Compositor + Area Cache](029-incremental-overlay-and-area-cache.md) — the concrete implementation of rule 2, plus rewrite hints.

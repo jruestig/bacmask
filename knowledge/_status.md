@@ -1,9 +1,9 @@
-# Status — 2026-04-19 (session 6 update)
+# Status — 2026-04-19 (session 7 update)
 
 Session-handoff doc. Updated at the end of each working session. What follows `knowledge/` conventions — kept short on purpose.
 
 ## Currently working on
-- Nothing in flight at end of session 6. Brush model is fully implemented, perf-tuned, and revised through several rounds of UX iteration.
+- Nothing in flight at end of session 7. Many-region editing is now fast in the N=100–150 range; remaining scaling moves are documented in [029](029-incremental-overlay-and-area-cache.md) and are not MVP-blocking.
 
 ## In progress (started, not done)
 - None.
@@ -19,6 +19,14 @@ Session-handoff doc. Updated at the end of each working session. What follows `k
 3. **Bundle/area save fixtures.** When the brush save-flow stabilizes in user hands, add a regression test that round-trips a brush-edited region and asserts the polygon survives bit-identically.
 
 ## Recently completed (last ~3 sessions)
+- **Many-region perf pass (session 7).** User reported adding the 20th region felt slow; past 100 it was visibly sluggish. Root causes and fixes documented in [029 — Incremental Overlay Compositor + Per-Region Area Cache](029-incremental-overlay-and-area-cache.md). Three compounding O(N·H·W) loops on every edit replaced with O(bbox) or O(1):
+  - **Bbox-scoped label-map repaint.** New helpers in `bacmask/core/masking.py` — `repaint_label_map_bbox`, `mask_bbox`, `union_bbox`, `vertices_bbox`. Every `Lasso / Delete / VertexEdit / BrushStroke` command now repaints only within the union bbox of (old_mask ∪ new_mask) instead of zeroing + re-painting the whole `label_map`. `LassoCloseCommand.apply` skips the repaint entirely — new region has the highest id, so `label_map[mask] = id` is already correct.
+  - **Incremental overlay compositor.** `ImageCanvas` keeps persistent `_overlay_acc_rgb` (float32), `_overlay_acc_a` (float32), `_overlay_rgba_buf` (uint8) buffers, plus a tracked snapshot of last-composited masks. Diffs against it every `regions_version` bump. Fast path for pure additions (ids all above max tracked) composites each new region in its own bbox; general path (removes/subtracts/shape edits) zeroes the union bbox and re-composites only regions intersecting it. Texture allocated once per image, `blit_buffer` on updates.
+  - **Per-region area cache.** `SessionState.region_areas: dict[int, int]` kept in lockstep with `region_masks` by every command. `MaskService.compute_area_rows` reads the cache; no `mask.sum()` per refresh. `load_bundle` populates once at rasterization. Invariant: direct mutations of `state.region_masks` must also update `state.region_areas` (two tests that poked masks were fixed).
+  - **Incremental `ResultsTable`.** Per-id `_Row` widget registry. Refresh adds/removes only for id diffs and mutates Label `.text` in place for changed rows. Selection-only notifies take a separate `_refresh_selection` path that just updates `_Row._bg_color.rgba` — no widget churn, no text rebuild.
+  - **Measured (2000×2000):** 30-add overlay composite 8541 ms → 18 ms (~480×). `compute_area_rows` at N=150: 166 ms → 0.12 ms (~1400×). `LassoCloseCommand.apply` flat ~2–4 ms regardless of N.
+  - **Rewrite hints recorded** in [029](029-incremental-overlay-and-area-cache.md) for if the app ever scales past a few hundred regions: sparse per-region masks (biggest structural win — drops 400 MB to tens of MB), per-region bbox cache, ref-not-copy undo snapshots, `RecycleView` for the results table, partial-bbox texture upload, per-region cached RGBA layer.
+  - **Suite.** 210 passing, ruff + format clean.
 - **Brush model — full session arc (session 6).** Implemented [026](026-brush-edit-model.md) end-to-end and then iterated heavily based on live use:
   - **First cut (modifier-key model).** `BrushStrokeCommand` replaces `RegionEditCommand`. `MaskService.begin_brush_stroke / add_brush_sample / end_brush_stroke / cancel_brush_stroke`. Disc stamp + `cv2.line` sweep with rounded caps for gap-free fast strokes. Tool toggles in the toolbar (Lasso / Brush), `L` / `B` hotkeys, `e` freed. Old `edit_region_stroke`, `find_boundary_crossings`, `rasterize_stroke_polygon`, `state.edit_mode`, edit toolbar button, `RegionEditCommand` all deleted.
   - **Subtract bug fix.** Adapter's mirrored `_modifiers` was never populated because the App owns `Window.on_key_down`. Switched to reading `Window.modifiers` directly at press-down. (Later removed entirely — see below.)

@@ -187,19 +187,21 @@ No other dependencies. Keep it lean.
 
 ## Definition of Done (MVP)
 
-- [ ] User can load an image from disk via file picker (shown in original color).
-- [ ] User can input a scale factor (mm per pixel); empty = uncalibrated.
-- [ ] User can trace a closed boundary around a colony with the lasso tool (release to close; `Enter` as equivalent explicit trigger). Stored polygon is the cleaned raster contour, not the raw scribble.
-- [ ] User can edit an existing region's boundary with the brush tool — `Shift` adds paint, `Ctrl` subtracts. Brush only touches the region under the press-down point. Overlap with other regions is allowed.
-- [ ] User can delete a region; its label ID is not re-used. `Ctrl`-brush that empties a region resolves as a Delete.
-- [ ] All region areas (px and mm²) are displayed in a results panel, updating live.
-- [ ] Masks persist on the canvas — they never auto-disappear.
-- [ ] **Save** writes `<image_stem>.bacmask` (bundle only, no mask, no CSV).
-- [ ] **Export** writes `<image_stem>_areas.csv` (CSV only).
-- [ ] Bundle can be reloaded for a given image and restores regions + scale + IDs exactly (polygons canonical). Double-click on a file in the picker opens it.
-- [ ] CSV is directly human-readable with the locked column schema.
-- [ ] Undo / redo works for lasso close, brush stroke, and delete, with a bounded history.
-- [ ] Every toolbar button label includes its keyboard shortcut.
-- [ ] App runs on Linux and Windows.
-- [ ] Unit tests pass for core logic (rasterization, area, bundle I/O, CSV, undo/redo, calibration).
-- [ ] `ruff check` and `ruff format --check` pass.
+> **Status (2026-04-19):** all items are functionally implemented except the Windows-run validation. Boxes below reflect code state — re-check by running `pytest` + `ruff check` + `ruff format --check`, and by doing a live smoke run in a Kivy window. Update this block when items change.
+
+- [x] User can load an image from disk via file picker (shown in original color).
+- [x] User can input a scale factor (mm per pixel); empty = uncalibrated.
+- [x] User can trace a closed boundary around a colony with the lasso tool (release to close; `Enter` as equivalent explicit trigger). Stored polygon is the cleaned raster contour, not the raw scribble.
+- [x] User can edit an existing region's boundary with the brush tool. Mode (Create / Add / Subtract) is a persistent toolbar toggle cycled with `Tab` ([knowledge/026](knowledge/026-brush-edit-model.md)). In add/subtract the target locks at press-down — press on a region targets it; press on background uses the selected region, letting subtract carve in from outside. Overlap with other regions is allowed.
+- [x] User can delete a region; its label ID is not re-used. A subtract-mode brush stroke that empties a region resolves as a Delete.
+- [x] All region areas (px and mm²) are displayed in a results panel, updating live.
+- [x] Masks persist on the canvas — they never auto-disappear.
+- [x] **Save** writes `<image_stem>.bacmask` (bundle only, no mask, no CSV).
+- [x] **Export** writes `<image_stem>_areas.csv` (CSV only).
+- [x] Bundle can be reloaded for a given image and restores regions + scale + IDs exactly (polygons canonical). Double-click on a file in the picker opens it.
+- [x] CSV is directly human-readable with the locked column schema.
+- [x] Undo / redo works for lasso close, brush stroke, and delete, with a bounded history.
+- [x] Every toolbar button label includes its keyboard shortcut.
+- [ ] App runs on Linux and Windows. *(Linux verified; Windows validation deferred — `packaging/bacmask.spec` exists but no built/tested `.exe` yet.)*
+- [x] Unit tests pass for core logic (rasterization, area, bundle I/O, CSV, undo/redo, calibration).
+- [x] `ruff check` and `ruff format --check` pass.

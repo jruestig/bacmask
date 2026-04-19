@@ -61,6 +61,9 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Conversatio
 - [027 — Toolbar Hotkey Labels](027-toolbar-hotkey-labels.md)
 - [028 — File Picker Double-Click to Open](028-file-picker-double-click.md)
 
+### Performance (2026-04-19)
+- [029 — Incremental Overlay Compositor + Per-Region Area Cache](029-incremental-overlay-and-area-cache.md)
+
 ### Superseded (archived in [`superseded/`](superseded/))
 Retired decisions kept for reasoning trails and decision-record context. Do **not** implement against these — each carries a banner pointing to its replacement.
 

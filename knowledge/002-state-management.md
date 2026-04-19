@@ -5,7 +5,7 @@ tags: [architecture, core]
 created: 2026-04-17
 updated: 2026-04-19
 status: accepted
-related: [001, 003, 008, 014, 015, 017, 023, 025, 026]
+related: [001, 003, 008, 014, 015, 017, 023, 025, 026, 029]
 ---
 
 # Centralized Session State
@@ -36,11 +36,14 @@ Single source of truth for the annotation session. No state scattered across UI 
 Mask representations are computed from `regions`, cached for performance, and invalidated on any polygon mutation. They are **never** written to disk by Save — masks leave the system only via the deferred export ([024](024-mask-export-deferred.md)).
 
 - `region_masks: dict[int, np.ndarray]` — one `bool` array `(H, W)` per region, rasterized from its polygon. Authoritative for hit-testing, area computation, and the brush add/subtract boolean ops ([026](026-brush-edit-model.md)).
-- `label_map_cache: np.ndarray | None` — `uint16` `(H, W)` display cache, populated by painting each region's pixels in ascending `label_id` order so the highest `label_id` wins on overlapping pixels. Used only for rendering and click-select tiebreak ([025](025-overlapping-regions.md)). Never the source of truth; always regeneratable from `region_masks`.
+- `region_areas: dict[int, int]` — cached pixel count per region (`int(region_mask.sum())`). Kept in lockstep with `region_masks` by every command so `compute_area_rows` never re-sums HxW masks on refresh. Invariant: **any code that mutates `region_masks[lid]` directly must also update `region_areas[lid]`.** See [029](029-incremental-overlay-and-area-cache.md).
+- `label_map: np.ndarray | None` — `uint16` `(H, W)` display cache, populated by painting each region's pixels in ascending `label_id` order so the highest `label_id` wins on overlapping pixels. Used only for rendering and click-select tiebreak ([025](025-overlapping-regions.md)). Never the source of truth; always regeneratable from `region_masks`.
 
 Regeneration granularity:
-- On `LassoCloseCommand` / `BrushStrokeCommand` / `VertexEditCommand` / `DeleteRegionCommand`, only the affected region's entry in `region_masks` is rebuilt (or removed); the `label_map_cache` is repainted from the full `region_masks` set in ascending id order.
-- On `load_bundle`, both caches are built fresh from polygons.
+- On `LassoCloseCommand.apply`, the new region's mask is inserted and its pixels are painted into `label_map` directly (newest id wins). No full repaint.
+- On `DeleteRegionCommand` / `VertexEditCommand` / `BrushStrokeCommand` (and `LassoCloseCommand.undo`), only the union bbox of (old_mask ∪ new_mask) is zeroed and re-painted via `masking.repaint_label_map_bbox`. Bbox-scoped, not full-image.
+- On `load_bundle`, both caches are built fresh from polygons; `region_areas` is summed once at that time.
+- Overlay compositing uses a persistent float32 accumulator and diffs mask identity per update; see [029](029-incremental-overlay-and-area-cache.md) for the full architecture.
 
 ## Rules
 - Mutations go through **service methods**, never direct field assignment from UI.
@@ -60,3 +63,4 @@ Without this, state leaks into widget attributes, save detection breaks, undo/re
 - [023 — Edit Mode](superseded/023-edit-mode-region-boolean-edits.md) — superseded; no longer reads `edit_mode`.
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — polygons canonical; derived masks may overlap.
 - [026 — Brush Edit Model](026-brush-edit-model.md) — consumer of `active_brush_stroke`, `brush_radius_px`, `brush_default_mode`, `selected_region_id`-as-lock.
+- [029 — Incremental Overlay + Area Cache](029-incremental-overlay-and-area-cache.md) — regeneration granularity, `region_areas` invariant, future-rewrite hints.
