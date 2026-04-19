@@ -60,3 +60,4 @@ jobs:
         with:
           files: dist/bacmask-setup-${{ steps.version.outputs.version }}.exe
           fail_on_unmatched_files: true
+
