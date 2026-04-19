@@ -100,10 +100,13 @@ def test_close_lasso_stores_raster_derived_contour(tmp_path):
     # that could sit inside the drawn shape.
     raw_verts = [(10, 10), (30, 10), (30, 30), (12, 30), (12, 15)]
     _draw_lasso(svc, raw_verts)
-    mask = svc.state.region_masks[1]
+    from bacmask.core import masking
+
+    stored = np.asarray(svc.state.regions[1]["vertices"], dtype=np.int32)
+    mask = masking.rasterize_polygon_mask(stored, svc.state.label_map.shape)
     # Every stored vertex lies on the rasterized region's boundary — no stray
     # chord vertex can survive the findContours pass.
-    for x, y in svc.state.regions[1]["vertices"]:
+    for x, y in stored.tolist():
         assert mask[y, x], f"stored vertex ({x}, {y}) is not on the mask"
 
 
@@ -410,23 +413,29 @@ def test_edit_vertices_undo_via_history(tmp_path):
 
 
 def test_edit_vertices_allows_overlap_with_neighbor(tmp_path):
-    """Overlaps are allowed (knowledge/025). Region 2's own mask is preserved,
-    and region 1's expanded mask does claim the shared pixels too. The display
-    label_map shows the higher id on top (region 2) for the overlap.
+    """Overlaps are allowed (knowledge/025). Region 2's polygon is preserved,
+    and region 1's expanded polygon does claim the shared pixels too. The
+    display label_map shows the higher id on top (region 2) for the overlap.
     """
+    from bacmask.core import masking
+
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, [(5, 5), (15, 5), (15, 15), (5, 15)])  # region 1
     _draw_lasso(svc, [(20, 5), (30, 5), (30, 15), (20, 15)])  # region 2
-    r2_mask_before = svc.state.region_masks[2].copy()
+    r2_verts_before = list(svc.state.regions[2]["vertices"])
 
     # Extend region 1 into region 2's range.
     svc.edit_vertices(1, [(5, 5), (25, 5), (25, 15), (5, 15)])
 
-    # Region 2's own mask is untouched.
-    assert np.array_equal(svc.state.region_masks[2], r2_mask_before)
-    # Region 1's mask now claims overlapping pixels (e.g. inside both rectangles).
-    assert svc.state.region_masks[1][10, 22] is np.True_ or svc.state.region_masks[1][10, 22]
+    # Region 2's polygon is untouched.
+    assert svc.state.regions[2]["vertices"] == r2_verts_before
+    # Region 1's mask (derived on demand) now claims overlapping pixels.
+    r1_mask = masking.rasterize_polygon_mask(
+        np.asarray(svc.state.regions[1]["vertices"], dtype=np.int32),
+        svc.state.label_map.shape,
+    )
+    assert bool(r1_mask[10, 22])
     # Display cache: higher id (region 2) wins the overlap pixel.
     assert svc.state.label_map[10, 22] == 2
 
@@ -532,39 +541,38 @@ def test_set_brush_default_mode_create():
 # ---- zero-area guard ----
 
 
-# ---- region_masks derived state ----
+# ---- derived region mask (polygon is canonical, knowledge/030) ----
 
 
-def test_region_masks_populated_on_lasso_close(tmp_path):
+def test_region_polygon_populated_on_lasso_close(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square())
-    assert 1 in svc.state.region_masks
-    rm = svc.state.region_masks[1]
-    assert rm.dtype == bool
-    assert rm.shape == svc.state.label_map.shape
-    # region_masks count equals label_map count (disjoint, no overlaps yet).
-    assert rm.sum() == (svc.state.label_map == 1).sum()
+    assert 1 in svc.state.regions
+    assert len(svc.state.regions[1]["vertices"]) >= 3
+    assert (svc.state.label_map == 1).any()
 
 
-def test_region_masks_cleared_on_delete(tmp_path):
+def test_region_cleared_on_delete(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square())
     svc.delete_region(1)
-    assert 1 not in svc.state.region_masks
+    assert 1 not in svc.state.regions
     assert (svc.state.label_map == 1).sum() == 0
 
 
-def test_region_masks_restored_on_undo(tmp_path):
+def test_region_restored_on_undo(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square())
-    pixels = svc.state.region_masks[1].sum()
+    label_before = svc.state.label_map.copy()
+    verts_before = list(svc.state.regions[1]["vertices"])
     svc.delete_region(1)
     svc.undo()
-    assert 1 in svc.state.region_masks
-    assert svc.state.region_masks[1].sum() == pixels
+    assert 1 in svc.state.regions
+    assert svc.state.regions[1]["vertices"] == verts_before
+    assert np.array_equal(svc.state.label_map, label_before)
 
 
 def test_area_is_overlap_inclusive(tmp_path):
@@ -584,7 +592,7 @@ def test_area_is_overlap_inclusive(tmp_path):
     assert rows[0].area_px == pytest.approx(100.0, abs=1e-9)
 
 
-def test_load_bundle_rebuilds_region_masks(tmp_path):
+def test_load_bundle_rebuilds_label_map(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square())
@@ -595,8 +603,8 @@ def test_load_bundle_rebuilds_region_masks(tmp_path):
 
     svc2 = MaskService()
     svc2.load_bundle(bundle_p)
-    assert 1 in svc2.state.region_masks
-    assert svc2.state.region_masks[1].sum() == svc.state.region_masks[1].sum()
+    assert 1 in svc2.state.regions
+    assert np.array_equal(svc2.state.label_map, svc.state.label_map)
 
 
 def test_close_lasso_discards_zero_area_polygon(tmp_path, caplog):
@@ -612,6 +620,21 @@ def test_close_lasso_discards_zero_area_polygon(tmp_path, caplog):
 
 
 # ---- brush stroke: add / subtract (knowledge/026) ---------------------------
+
+
+def _region_pixels(svc: MaskService, label_id: int) -> int:
+    """Rasterize the canonical polygon for ``label_id`` and return its pixel count."""
+    from bacmask.core import masking
+
+    verts = np.asarray(svc.state.regions[label_id]["vertices"], dtype=np.int32)
+    return int(masking.rasterize_polygon_mask(verts, svc.state.label_map.shape).sum())
+
+
+def _region_mask(svc: MaskService, label_id: int) -> np.ndarray:
+    from bacmask.core import masking
+
+    verts = np.asarray(svc.state.regions[label_id]["vertices"], dtype=np.int32)
+    return masking.rasterize_polygon_mask(verts, svc.state.label_map.shape)
 
 
 def _run_brush(
@@ -673,7 +696,7 @@ def test_brush_subtract_from_outside_carves_into_region(tmp_path):
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))  # region 1, 121 px
     svc.select_region(1)
-    before = int(svc.state.region_masks[1].sum())
+    before = _region_pixels(svc, 1)
     svc.set_brush_radius(3)
     svc.set_brush_default_mode("subtract")
 
@@ -687,7 +710,7 @@ def test_brush_subtract_from_outside_carves_into_region(tmp_path):
         svc.add_brush_sample((x, 15))
     result = svc.end_brush_stroke()
     assert result == "subtracted"
-    assert int(svc.state.region_masks[1].sum()) < before
+    assert _region_pixels(svc, 1) < before
 
 
 def test_begin_brush_stroke_press_on_other_region_retargets(tmp_path):
@@ -732,13 +755,13 @@ def test_brush_add_extends_region(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))  # region 1, 121 px
-    before = int(svc.state.region_masks[1].sum())
+    before = _region_pixels(svc, 1)
     svc.set_brush_radius(3)
 
     # Press inside, drag out past the right edge — paint adds a lobe.
     result = _run_brush(svc, [(15, 15), (20, 15), (24, 15)])
     assert result == "added"
-    assert int(svc.state.region_masks[1].sum()) > before
+    assert _region_pixels(svc, 1) > before
     # History: original lasso + one brush command.
     assert len(svc.history) == 2
 
@@ -747,13 +770,13 @@ def test_brush_subtract_cuts_a_bite(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))  # region 1, 121 px
-    before = int(svc.state.region_masks[1].sum())
+    before = _region_pixels(svc, 1)
     svc.set_brush_radius(2)
 
     # Subtract mode set; press inside; drag along the bottom edge.
     result = _run_brush(svc, [(13, 18), (16, 18), (18, 18)], mode="subtract")
     assert result == "subtracted"
-    after = int(svc.state.region_masks[1].sum())
+    after = _region_pixels(svc, 1)
     assert after < before
     assert after > 0  # not fully erased
 
@@ -771,7 +794,6 @@ def test_brush_subtract_emptying_routes_to_delete(tmp_path):
     result = _run_brush(svc, [(11, 11)], mode="subtract")
     assert result == "deleted"
     assert 1 not in svc.state.regions
-    assert 1 not in svc.state.region_masks
     # ID 1 stays reserved — monotonic IDs (knowledge/014).
     assert svc.state.next_label_id == id_before
 
@@ -810,7 +832,7 @@ def test_brush_create_mode_commits_new_region(tmp_path):
     result = _run_brush(svc, [(20, 20), (25, 20), (30, 20)], mode="create")
     assert result == "created"
     assert 1 in svc.state.regions
-    assert svc.state.region_masks[1].any()
+    assert _region_mask(svc, 1).any()
     # ID monotonic — next stroke should land on 2.
     assert svc.state.next_label_id == 2
 
@@ -821,7 +843,7 @@ def test_brush_create_mode_ignores_existing_regions(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))  # region 1
-    before_r1 = svc.state.region_masks[1].copy()
+    before_r1_verts = list(svc.state.regions[1]["vertices"])
     svc.set_brush_radius(3)
 
     # Press inside region 1, but in create mode → makes a new region 2 instead
@@ -830,7 +852,7 @@ def test_brush_create_mode_ignores_existing_regions(tmp_path):
     assert result == "created"
     assert 2 in svc.state.regions
     # Region 1 untouched.
-    assert np.array_equal(svc.state.region_masks[1], before_r1)
+    assert svc.state.regions[1]["vertices"] == before_r1_verts
 
 
 def test_brush_create_mode_undo(tmp_path):
@@ -875,14 +897,12 @@ def test_brush_add_undo_restores_state_pixel_identically(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))
-    before_mask = svc.state.region_masks[1].copy()
     before_verts = list(svc.state.regions[1]["vertices"])
     before_map = svc.state.label_map.copy()
     svc.set_brush_radius(3)
 
     assert _run_brush(svc, [(15, 15), (22, 15)]) == "added"
     assert svc.undo() is True
-    assert np.array_equal(svc.state.region_masks[1], before_mask)
     assert svc.state.regions[1]["vertices"] == before_verts
     assert np.array_equal(svc.state.label_map, before_map)
 
@@ -894,36 +914,36 @@ def test_brush_target_locked_at_press_down(tmp_path):
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(5, 10, 10))  # region 1: x=5..15
     _draw_lasso(svc, _square(25, 10, 10))  # region 2: x=25..35
-    r2_before = svc.state.region_masks[2].copy()
+    r2_verts_before = list(svc.state.regions[2]["vertices"])
     svc.set_brush_radius(2)
 
     # Press inside region 1, drag through the gap into region 2's territory.
     result = _run_brush(svc, [(10, 15), (20, 15), (28, 15)])
     assert result == "added"
-    # Region 2's own mask is unchanged — the stroke only edits region 1.
-    assert np.array_equal(svc.state.region_masks[2], r2_before)
+    # Region 2's polygon is unchanged — the stroke only edits region 1.
+    assert svc.state.regions[2]["vertices"] == r2_verts_before
     # Region 1 grew toward region 2.
-    assert svc.state.region_masks[1][15, 20]
+    assert _region_mask(svc, 1)[15, 20]
 
 
 def test_brush_overlap_with_neighbor_allowed(tmp_path):
-    """Adding into a neighbor's pixels: both region_masks claim overlap;
+    """Adding into a neighbor's pixels: both derived masks claim overlap;
     display cache shows highest id (knowledge/025)."""
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(5, 10, 10))  # region 1
     _draw_lasso(svc, _square(20, 10, 10))  # region 2
-    r2_before = svc.state.region_masks[2].copy()
+    r2_verts_before = list(svc.state.regions[2]["vertices"])
     svc.set_brush_radius(3)
 
     # Drag from inside region 1 into region 2's body. Add stroke.
     result = _run_brush(svc, [(10, 15), (16, 15), (22, 15)])
     assert result == "added"
-    # Region 2 untouched.
-    assert np.array_equal(svc.state.region_masks[2], r2_before)
-    # The shared pixel belongs to both region_masks.
-    assert svc.state.region_masks[1][15, 22]
-    assert svc.state.region_masks[2][15, 22]
+    # Region 2's polygon untouched.
+    assert svc.state.regions[2]["vertices"] == r2_verts_before
+    # The shared pixel belongs to both derived masks.
+    assert _region_mask(svc, 1)[15, 22]
+    assert _region_mask(svc, 2)[15, 22]
     # Display: higher id wins.
     assert svc.state.label_map[15, 22] == 2
 
@@ -946,35 +966,25 @@ def test_brush_notifies_observers(tmp_path):
     assert sum(calls) >= 1
 
 
-def test_brush_add_does_not_read_region_masks(tmp_path):
-    """Brush add must commit correctly even when ``state.region_masks`` is
-    stale (i.e. does not reflect the current polygon). After the wave-2
-    removal this is guaranteed by construction; for now, force the staleness
-    by zeroing ``state.region_masks[target]`` before the commit and verify
-    the new polygon traces the real union of (real target polygon) ∪
-    (stroke footprint), not the zeros.
+def test_brush_add_reads_polygon_not_mask(tmp_path):
+    """Brush add must commit against the canonical polygon (knowledge/030).
 
-    See knowledge/030 — polygons are the only mask truth; the brush commit
-    path rasterizes the target on demand rather than reading a stored mask.
+    After wave-2 the service never stores per-region masks — the target is
+    rasterized on demand from ``state.regions[target]['vertices']``. This
+    test pins the behavior: the committed polygon covers both the original
+    target's interior (proof we saw the real polygon) and the stroke
+    extension past the old right edge.
     """
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))  # region 1 at roughly (10..20, 10..20)
-
-    # Corrupt the stored per-region mask. Any code path that reads
-    # ``state.region_masks[1]`` during the brush commit would see all-False
-    # and produce a polygon tracing only the stroke footprint.
-    svc.state.region_masks[1] = np.zeros_like(svc.state.region_masks[1])
 
     svc.set_brush_radius(2)
     result = _run_brush(svc, [(18, 15), (22, 15), (25, 15)], mode="add")
     assert result == "added"
 
     # Rasterize the committed polygon and verify it covers the original
-    # target's interior (e.g. a pixel well inside the square) *and* the
-    # stroke extension (e.g. a pixel past the old right edge). If the
-    # commit had read the corrupted mask, the interior pixels of the
-    # original square would be lost.
+    # target's interior *and* the stroke extension.
     from bacmask.core import masking
 
     committed_mask = masking.rasterize_polygon_mask(
@@ -982,6 +992,6 @@ def test_brush_add_does_not_read_region_masks(tmp_path):
         svc.state.label_map.shape,
     )
     # Pixel firmly inside the original square but outside the stroke.
-    assert committed_mask[12, 12], "original target interior lost → commit read stale mask"
+    assert committed_mask[12, 12], "original target interior lost → commit dropped real polygon"
     # Pixel painted by the stroke past the old right edge (x=22, y=15).
     assert committed_mask[15, 22], "stroke extension missing from committed polygon"

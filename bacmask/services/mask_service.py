@@ -256,7 +256,7 @@ class MaskService:
             _discard()
             return None
 
-        cmd = LassoCloseCommand(clean_verts, region_mask=clean_mask)
+        cmd = LassoCloseCommand(clean_verts)
         self.history.push(cmd, self.state)
         self._active_lasso = []
         self.state.active_lasso = None
@@ -517,15 +517,9 @@ class MaskService:
         # Translate vertex coords from crop-space back to image-space.
         new_vertices = crop_verts + np.array([ux0, uy0], dtype=np.int32)
 
-        # Wave-1 compat (knowledge/030): BrushStrokeCommand still takes a
-        # full-image mask. Rasterize the final polygon once and hand it over.
-        # Wave 2 will remove the parameter entirely.
-        full_mask = masking.rasterize_polygon_mask(new_vertices, s_mask.shape)
-
         edit_cmd = BrushStrokeCommand(
             label_id=target_id,
             new_vertices=new_vertices,
-            new_region_mask=full_mask,
         )
         self.history.push(edit_cmd, self.state)
         self._notify()
@@ -556,13 +550,10 @@ class MaskService:
             self._notify()
             return None
 
-        # Translate vertex coords from crop-space to image-space and paste
-        # the cleaned mask back into a full-image bool mask.
+        # Translate vertex coords from crop-space to image-space.
         new_vertices = crop_verts + np.array([sx0, sy0], dtype=np.int32)
-        full_mask = np.zeros_like(s_mask)
-        full_mask[sy0:sy1, sx0:sx1] = filtered_crop
 
-        cmd = LassoCloseCommand(new_vertices, region_mask=full_mask)
+        cmd = LassoCloseCommand(new_vertices)
         self.history.push(cmd, self.state)
         self._notify()
         return "created"

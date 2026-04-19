@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from bacmask.core import masking
 from bacmask.core.commands import (
     BrushStrokeCommand,
     DeleteRegionCommand,
@@ -23,6 +24,12 @@ def _square_verts(x0: int = 10, y0: int = 10, size: int = 10) -> np.ndarray:
         [[x0, y0], [x0 + size, y0], [x0 + size, y0 + size], [x0, y0 + size]],
         dtype=np.int32,
     )
+
+
+def _region_mask(state: SessionState, label_id: int) -> np.ndarray:
+    """Derive a region's bool mask from its canonical polygon."""
+    verts = np.asarray(state.regions[label_id]["vertices"], dtype=np.int32)
+    return masking.rasterize_polygon_mask(verts, state.label_map.shape)
 
 
 # ---- LassoCloseCommand -------------------------------------------------------
@@ -159,9 +166,9 @@ def test_vertex_edit_apply_undo_apply_is_idempotent():
 
 
 def test_vertex_edit_allows_overlap_with_neighbor():
-    """No clip rule (knowledge/025). Region 1's expanded mask includes pixels
-    that region 2 also claims; region 2's own mask is unchanged; the display
-    label_map shows the higher id on the overlap.
+    """No clip rule (knowledge/025). Region 1's expanded polygon encloses
+    pixels that region 2 also claims; region 2's polygon is unchanged; the
+    display label_map shows the higher id on the overlap.
     """
     s = _state(h=50, w=50)
     LassoCloseCommand(np.array([[5, 5], [15, 5], [15, 15], [5, 15]], dtype=np.int32)).apply(
@@ -171,16 +178,16 @@ def test_vertex_edit_allows_overlap_with_neighbor():
         s
     )  # region 2
 
-    region2_mask_before = s.region_masks[2].copy()
+    region2_verts_before = list(s.regions[2]["vertices"])
 
     # Edit region 1 to extend into region 2's column range.
     new_verts = np.array([[5, 5], [25, 5], [25, 15], [5, 15]], dtype=np.int32)
     VertexEditCommand(label_id=1, new_vertices=new_verts).apply(s)
 
-    # Region 2's own mask is untouched.
-    assert np.array_equal(s.region_masks[2], region2_mask_before)
-    # Region 1 now claims the overlap pixels in its own mask.
-    assert s.region_masks[1][10, 22]
+    # Region 2's polygon is untouched.
+    assert s.regions[2]["vertices"] == region2_verts_before
+    # Region 1's derived mask now claims the overlap pixel.
+    assert _region_mask(s, 1)[10, 22]
     # Display cache: higher id on overlap; label 1 in the newly-claimed gap.
     assert s.label_map[10, 22] == 2
     assert s.label_map[10, 18] == 1
@@ -191,8 +198,8 @@ def test_vertex_edit_overlap_is_reversible():
     LassoCloseCommand(np.array([[5, 5], [15, 5], [15, 15], [5, 15]], dtype=np.int32)).apply(s)
     LassoCloseCommand(np.array([[20, 5], [30, 5], [30, 15], [20, 15]], dtype=np.int32)).apply(s)
     before_map = s.label_map.copy()
-    before_r1_mask = s.region_masks[1].copy()
-    before_r2_mask = s.region_masks[2].copy()
+    before_r1_verts = list(s.regions[1]["vertices"])
+    before_r2_verts = list(s.regions[2]["vertices"])
 
     new_verts = np.array([[5, 5], [25, 5], [25, 15], [5, 15]], dtype=np.int32)
     cmd = VertexEditCommand(label_id=1, new_vertices=new_verts)
@@ -200,8 +207,8 @@ def test_vertex_edit_overlap_is_reversible():
     cmd.undo(s)
 
     assert np.array_equal(s.label_map, before_map)
-    assert np.array_equal(s.region_masks[1], before_r1_mask)
-    assert np.array_equal(s.region_masks[2], before_r2_mask)
+    assert s.regions[1]["vertices"] == before_r1_verts
+    assert s.regions[2]["vertices"] == before_r2_verts
 
 
 def test_vertex_edit_rejects_fewer_than_3_vertices():
@@ -237,24 +244,16 @@ def test_vertex_edit_shape_change_no_other_region():
 # ---- BrushStrokeCommand -------------------------------------------------------
 
 
-def _make_mask(shape: tuple[int, int], verts: np.ndarray) -> np.ndarray:
-    from bacmask.core import masking
-
-    return masking.rasterize_polygon_mask(verts, shape)
-
-
-def test_brush_stroke_command_swaps_vertices_and_mask():
+def test_brush_stroke_command_swaps_vertices():
     s = _state()
     LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)  # region 1
 
     new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
-    new_mask = _make_mask(s.label_map.shape, new_verts)
 
-    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts)
     cmd.apply(s)
 
     assert s.regions[1]["vertices"] == new_verts.tolist()
-    assert np.array_equal(s.region_masks[1], new_mask)
     assert (s.label_map == 1).any()
     # Region extends further right now.
     ys, xs = np.where(s.label_map == 1)
@@ -266,17 +265,14 @@ def test_brush_stroke_command_undo_restores_state():
     s = _state()
     LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
     before_map = s.label_map.copy()
-    before_mask = s.region_masks[1].copy()
     before_verts = list(s.regions[1]["vertices"])
 
     new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
-    new_mask = _make_mask(s.label_map.shape, new_verts)
-    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts)
     cmd.apply(s)
     cmd.undo(s)
 
     assert np.array_equal(s.label_map, before_map)
-    assert np.array_equal(s.region_masks[1], before_mask)
     assert s.regions[1]["vertices"] == before_verts
 
 
@@ -285,38 +281,32 @@ def test_brush_stroke_command_apply_undo_apply_is_byte_identical():
     LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
 
     new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
-    new_mask = _make_mask(s.label_map.shape, new_verts)
-    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts)
     cmd.apply(s)
     after_map = s.label_map.copy()
-    after_mask = s.region_masks[1].copy()
+    after_verts = list(s.regions[1]["vertices"])
     cmd.undo(s)
     cmd.apply(s)
 
     assert np.array_equal(s.label_map, after_map)
-    assert np.array_equal(s.region_masks[1], after_mask)
+    assert s.regions[1]["vertices"] == after_verts
 
 
 def test_brush_stroke_command_rejects_unknown_label():
     s = _state()
     new_verts = np.array([[1, 1], [5, 1], [5, 5]], dtype=np.int32)
-    new_mask = _make_mask(s.label_map.shape, new_verts)
     with pytest.raises(ValueError):
         BrushStrokeCommand(
             label_id=99,
             new_vertices=new_verts,
-            new_region_mask=new_mask,
         ).apply(s)
 
 
-def test_brush_stroke_command_rejects_shape_mismatch():
+def test_brush_stroke_command_rejects_fewer_than_3_vertices():
     s = _state()
     LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
-    new_verts = np.array([[10, 10], [15, 10], [15, 15]], dtype=np.int32)
-    wrong_shape = np.zeros((5, 5), dtype=bool)
     with pytest.raises(ValueError):
         BrushStrokeCommand(
             label_id=1,
-            new_vertices=new_verts,
-            new_region_mask=wrong_shape,
+            new_vertices=np.array([[10, 10], [15, 10]], dtype=np.int32),
         ).apply(s)

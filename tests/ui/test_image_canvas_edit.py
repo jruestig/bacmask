@@ -25,13 +25,16 @@ def _service_with_region(img_w: int = 50, img_h: int = 50) -> MaskService:
     svc.state.label_map = np.zeros((img_h, img_w), dtype=np.uint16)
     # Pre-populate a square region at (10..20, 10..20) via direct state setup.
     verts = np.array([[10, 10], [20, 10], [20, 20], [10, 20]], dtype=np.int32)
-    region_mask = masking.rasterize_polygon_mask(verts, (img_h, img_w))
-    svc.state.region_masks[1] = region_mask
-    svc.state.region_areas[1] = int(region_mask.sum())
     svc.state.regions[1] = {"name": "region_01", "vertices": verts.tolist()}
     svc.state.next_label_id = 2
-    masking.repaint_label_map(svc.state.label_map, svc.state.region_masks)
+    # Paint the display cache from the canonical polygon set.
+    masking.paint_label_map_bbox(svc.state.label_map, svc.state.regions, (0, img_h, 0, img_w))
     return svc
+
+
+def _region_pixels(svc: MaskService, label_id: int) -> int:
+    verts = np.asarray(svc.state.regions[label_id]["vertices"], dtype=np.int32)
+    return int(masking.rasterize_polygon_mask(verts, svc.state.label_map.shape).sum())
 
 
 def _canvas(svc: MaskService, widget_w: float = 400.0, widget_h: float = 400.0) -> ImageCanvas:
@@ -138,7 +141,7 @@ def test_brush_drag_release_grows_region():
     svc = _service_with_region()
     svc.set_active_tool("brush")
     svc.set_brush_radius(3)
-    before = int(svc.state.region_masks[1].sum())
+    before = _region_pixels(svc, 1)
 
     c = _canvas(svc)
     # Press inside the (10..20, 10..20) square; drag out past the right edge.
@@ -154,7 +157,7 @@ def test_brush_drag_release_grows_region():
     c._on_input(PointerUp(pos=_widget_pos_for_image_pixel(c, path[-1], (50, 50))))
 
     assert svc.state.active_brush_stroke is None
-    assert int(svc.state.region_masks[1].sum()) > before
+    assert _region_pixels(svc, 1) > before
 
 
 def test_brush_subtract_drag_release_shrinks_region():
@@ -162,7 +165,7 @@ def test_brush_subtract_drag_release_shrinks_region():
     svc.set_active_tool("brush")
     svc.set_brush_radius(2)
     svc.set_brush_default_mode("subtract")
-    before = int(svc.state.region_masks[1].sum())
+    before = _region_pixels(svc, 1)
 
     c = _canvas(svc)
     path = [(13, 18), (16, 18), (18, 18)]
@@ -176,5 +179,5 @@ def test_brush_subtract_drag_release_shrinks_region():
         c._on_input(PointerMove(pos=_widget_pos_for_image_pixel(c, p, (50, 50))))
     c._on_input(PointerUp(pos=_widget_pos_for_image_pixel(c, path[-1], (50, 50))))
 
-    after = int(svc.state.region_masks[1].sum())
+    after = _region_pixels(svc, 1)
     assert after < before
