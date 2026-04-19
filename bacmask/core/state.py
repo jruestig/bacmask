@@ -38,19 +38,13 @@ class SessionState:
     image_filename: str | None = None
     image_bytes: bytes | None = None
     image_ext: str | None = None
-    # Display cache, painted from region_masks in ascending label order so the
-    # highest label wins on overlapping pixels. See knowledge/002, 025.
+    # Display cache, painted from the polygon set in ascending label order so
+    # the highest label wins on overlapping pixels. See knowledge/002, 025, 030.
     label_map: np.ndarray | None = None
-    # Canonical region storage: {label_id: {"name": str, "vertices": list[[x, y]]}}.
+    # Canonical region storage (knowledge/030): polygons are the sole source of
+    # truth — no per-region masks or cached pixel counts are stored here.
+    # Shape: ``{label_id: {"name": str, "vertices": list[[x, y]]}}``.
     regions: dict[int, dict[str, Any]] = field(default_factory=dict)
-    # Derived per-region bool masks, kept in sync by commands. Authoritative for
-    # area and hit-testing against the target region (knowledge/025).
-    region_masks: dict[int, np.ndarray] = field(default_factory=dict)
-    # Cached per-region pixel count (``mask.sum()``). Kept in sync by commands
-    # alongside ``region_masks`` so ``compute_area_rows`` doesn't have to re-sum
-    # every HxW mask on every results-panel refresh — that was O(N·H·W) per
-    # notify and dominated the perceived slowdown past ~100 regions.
-    region_areas: dict[int, int] = field(default_factory=dict)
     next_label_id: int = 1
     scale_mm_per_px: float | None = None
     # During drag this holds the growing list of captured samples; ndarray once
@@ -70,9 +64,9 @@ class SessionState:
     # Per-stroke buffer. None when no brush stroke is in flight.
     active_brush_stroke: BrushStroke | None = None
     dirty: bool = False
-    # Monotonic counter bumped whenever `regions` or `region_masks` change.
-    # Canvas watches this to gate the (expensive) overlay-texture rebuild so
-    # selection / mode / calibration notifies don't trigger a full repaint.
+    # Monotonic counter bumped whenever `regions` changes. Canvas watches this
+    # to gate the (expensive) overlay-texture rebuild so selection / mode /
+    # calibration notifies don't trigger a full repaint.
     regions_version: int = 0
 
     def set_image(self, image: np.ndarray, path: Path) -> None:
@@ -84,8 +78,6 @@ class SessionState:
         h, w = image.shape[:2]
         self.label_map = np.zeros((h, w), dtype=np.uint16)
         self.regions = {}
-        self.region_masks = {}
-        self.region_areas = {}
         self.next_label_id = 1
         self.active_lasso = None
         self.active_brush_stroke = None

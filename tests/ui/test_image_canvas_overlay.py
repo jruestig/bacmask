@@ -50,8 +50,6 @@ def _canvas_for(svc: MaskService) -> ImageCanvas:
     # Skip the GPU upload — the mock GL backend segfaults on Texture.create
     # here. The RGBA buffer the compositor fills is what we hash.
     c._blit_overlay_texture = lambda *_a, **_kw: None  # type: ignore[method-assign]
-    # Pre-rewrite diff machinery attribute — harmless once gone.
-    c._overlay_tracked = {}
     return c
 
 
@@ -72,18 +70,12 @@ def _service_with_two_overlapping_regions() -> MaskService:
     verts1 = np.array([[50, 50], [100, 50], [100, 100], [50, 100]], dtype=np.int32)
     verts2 = np.array([[80, 80], [130, 80], [130, 130], [80, 130]], dtype=np.int32)
 
-    mask1 = masking.rasterize_polygon_mask(verts1, (200, 200))
-    mask2 = masking.rasterize_polygon_mask(verts2, (200, 200))
-
     svc.state.regions[1] = {"name": "region_01", "vertices": verts1.tolist()}
     svc.state.regions[2] = {"name": "region_02", "vertices": verts2.tolist()}
-    svc.state.region_masks[1] = mask1
-    svc.state.region_masks[2] = mask2
-    svc.state.region_areas[1] = int(mask1.sum())
-    svc.state.region_areas[2] = int(mask2.sum())
     svc.state.next_label_id = 3
     svc.state.regions_version = 1
-    masking.repaint_label_map(svc.state.label_map, svc.state.region_masks)
+    # Paint the display cache from the canonical polygon set.
+    masking.paint_label_map_bbox(svc.state.label_map, svc.state.regions, (0, 200, 0, 200))
     return svc
 
 
