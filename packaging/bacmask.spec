@@ -10,8 +10,6 @@
 from pathlib import Path
 import sys
 
-from PyInstaller.utils.hooks import collect_submodules
-
 block_cipher = None
 
 SPEC_DIR = Path(SPECPATH).resolve()
@@ -50,10 +48,7 @@ if sys.platform.startswith("win"):
     except ImportError:
         pass
 
-hiddenimports = (
-    collect_submodules("bacmask")
-    + collect_submodules("kivy")
-)
+hiddenimports = []
 
 a = Analysis(
     [ENTRY],
