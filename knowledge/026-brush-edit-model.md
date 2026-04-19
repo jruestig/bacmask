@@ -1,140 +1,167 @@
 ---
 id: 026
-title: Brush Edit Model (Shift add / Ctrl subtract)
+title: Brush Edit Model (Create / Add / Subtract)
 tags: [architecture, core, ui]
 created: 2026-04-19
+updated: 2026-04-19
 status: accepted
 related: [002, 003, 013, 014, 016, 023, 025, 027]
 ---
 
 # Brush Edit Model
 
-Supersedes the lasso-based add/subtract stroke model in [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md). Boundary refinement now uses a GIMP-style brush with modifier keys for add vs. subtract. The old edit-mode toggle and boundary-crossing logic are removed.
+Supersedes the lasso-based add/subtract stroke model in [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md). Region boundary refinement (and now also new-region creation) uses a GIMP-style brush whose mode is a persistent toolbar setting cycled with **Tab**.
 
-## Why the pivot
+## History
 
-The lasso-against-region stroke ([023](superseded/023-edit-mode-region-boolean-edits.md)) required the user to produce a shape that crossed the region boundary exactly twice — any other input (fewer crossings, wrong start side, press-drag that never entered the region) was silently discarded. In practice this confused users: strokes looked correct but committed nothing, and there was no visible per-pixel feedback. Brush painting is the idiom every user in this space (ImageJ, GIMP, Photoshop, QuPath) already knows.
+This note has iterated across the same session as it was implemented. Earlier drafts proposed:
+
+1. **Modifier-key model** (`Shift` = add, `Ctrl` = subtract). Dropped after live use — modifier resolution at press-down through Kivy's `Window.modifiers` was fragile and the gesture was harder to teach than a persistent toggle. Replaced by the brush-panel toggles + Tab cycle.
+2. **Brush-only-edits invariant** (the brush could not create regions; that was the lasso's exclusive job). Dropped when **Create** mode was added — the brush now subsumes "paint a blob into a new region" alongside add/subtract editing.
+3. **Click-on-region required at press-down for add/subtract** (a press on background was a no-op). Dropped in favor of the **selection lock** below — the press-down location no longer needs to hit the target region, which made subtract-from-outside (carving from the empty pixels next to the boundary) work.
+
+What follows describes the current accepted model.
+
+## Why a brush at all
+
+The lasso-against-region stroke ([023](superseded/023-edit-mode-region-boolean-edits.md)) required the user to produce a shape that crossed the region boundary exactly twice — any other input was silently discarded. In practice this confused users: strokes looked correct but committed nothing, and there was no per-pixel feedback. Brush painting is the idiom every user in this space (ImageJ, GIMP, Photoshop, QuPath) already knows.
 
 ## Tool model
 
-Region-editing is now one explicit tool: **Brush**. The brush is a top-level tool on the toolbar alongside **Lasso** ([014](014-lasso-tool.md)). The previous "Edit mode toggle" is removed — there is no separate mode state; picking the brush is the mode.
+Region-editing is one explicit tool: **Brush**. The brush is a top-level tool on the toolbar alongside **Lasso** ([014](014-lasso-tool.md)). Picking the brush is the mode — there is no separate edit-mode toggle.
 
-- **Lasso** — creates new regions (press-drag-release on background).
-- **Brush** — modifies existing regions (press-drag-release on/against a region).
-- **Select tool** — pointer without either tool active; clicking a region sets `selected_region_id` for deletion / results-panel highlight (behavior unchanged).
+- **Lasso (`L`)** — outline-trace creation tool ([014](014-lasso-tool.md)).
+- **Brush (`B`)** — three-mode painting tool. See "Brush mode" below.
 
-Exactly one tool is active at a time; switching tools cancels any in-progress stroke.
+Exactly one tool is active at a time. Tool switching mid-stroke does not interrupt the in-flight stroke (it commits or cancels on its own terms); the switch lands on the next press-down.
 
-## Brush stroke semantics
+## Brush mode
 
-Press-drag-release with the brush tool active:
+`state.brush_default_mode: Literal["create", "add", "subtract"]` is the persistent default. It is read at press-down and held for the entire stroke; flipping the toggle mid-stroke does not retarget the in-flight stroke.
 
-1. **Press-down** resolves the **target region** in this priority order:
-   - If the pressed pixel hits an existing region in `label_map` (highest-id wins on overlap, per [025](025-overlapping-regions.md)), that region becomes the target *and* `state.selected_region_id` is set to it. Tapping another region thus re-targets the brush.
-   - Otherwise (background or out-of-bounds press-down) the existing `state.selected_region_id` is the target. The brush is **locked to the selected region** — this is what lets a subtract stroke begin on the empty pixels next to the boundary and carve a bite into the region from the outside in. Without the lock the user would have to start every subtract from inside the region, which made thin slices off the edge awkward.
-   - If neither the pressed pixel nor the selection resolves to an existing region → stroke is a **no-op**. The brush still cannot create new regions; that is the lasso's job. No history entry.
-   - Once resolved the target is locked for the entire stroke. Dragging across other regions or off the canvas does **not** re-target.
-   - The brush's target and the results-panel highlight / cyan outline are the same id — "the region my next action will touch" is the same as "the region I'm currently focused on."
-2. **Mode** is read at press-down from `state.brush_default_mode`. Three values:
-   - `create` — the stroke commits a brand-new region (LassoCloseCommand) built from the painted blob; it does not target any existing region. Press-down location is irrelevant beyond seeding the first stamp; the rule in step 1 about target resolution does **not** apply.
-   - `add` — paint extends the locked target region (`target | S`).
-   - `subtract` — paint removes pixels from the locked target (`target & ~S`).
-   The mode is set by the brush-panel toggles or cycled with **Tab**. Cycle order is `create → add → subtract → create`. There is **no modifier-key override** — the toggle is the mode. Switching the toggle mid-stroke does not affect the in-flight stroke; the read is at press-down only.
-3. **Drag** accumulates pointer samples. Each sample stamps a filled disc of radius `brush_radius_px` into the stroke's temp bool mask `S`.
-   - Between samples, the disc is swept along the straight segment (`cv2.line` with `thickness = 2 * brush_radius_px`) so there are no gaps at fast cursor speeds.
-   - `S` lives in the stroke buffer only; the stored region's mask is not touched until release.
-4. **Release** commits:
-   - `add`: `new_mask = target_mask | S`
-   - `subtract`: `new_mask = target_mask & ~S`
-   - If `new_mask == target_mask` (brush never intersected the target) → discard silently.
-   - If subtract empties the region (`not new_mask.any()`) → fires a `DeleteRegionCommand` instead of a brush edit, same as [023](superseded/023-edit-mode-region-boolean-edits.md).
-   - Otherwise commits a `BrushStrokeCommand(label_id, new_vertices, new_region_mask)`.
-5. **Vertex re-derivation.** The canonical polygon for the stored region is re-derived from `new_mask` via `largest_connected_component` + `contour_vertices` (same pipeline as [close_lasso cleanup](014-lasso-tool.md)). Stored polygons are always simple closed curves tracing the filled region's real boundary.
+Modes:
+
+- **Create** — press-drag-release commits a brand-new region built from the painted blob (LassoCloseCommand under the hood). Press-down location is irrelevant beyond seeding the first stamp; the target-resolution rule below does **not** apply, and the user's existing selection is left unchanged so they can flip between create and add/subtract on the same focus region.
+- **Add** — paint extends the locked target region (`new_mask = target | S`).
+- **Subtract** — paint removes pixels from the locked target (`new_mask = target & ~S`). Subtract that empties the region resolves as a delete (see [Delete-empties-region](#delete-empties-region)).
+
+Mode is set by the toggle buttons in the [brush panel](#ui-surface) and cycled with **Tab** in the order `create → add → subtract → create`. There is **no modifier-key override**: the toggle is the mode.
+
+## Press-down target resolution (add / subtract only)
+
+For add and subtract modes, press-down resolves the **target region** in this priority order:
+
+1. If the pressed pixel hits an existing region in `label_map` (highest-id wins on overlap, per [025](025-overlapping-regions.md)), that region becomes the target *and* `state.selected_region_id` is set to it. Tapping another region re-targets the brush.
+2. Otherwise (background or out-of-bounds press-down) the existing `state.selected_region_id` is the target. The brush is **locked to the selected region** — this is what lets a subtract stroke begin on the empty pixels next to the boundary and carve a bite into the region from outside in. Without the lock the user would have to start every subtract from inside the region, making thin slices off the edge awkward.
+3. If neither the pressed pixel nor the selection resolves to an existing region → stroke is a **no-op**. No history entry.
+
+Once resolved the target is locked for the entire stroke. Dragging across other regions or off the canvas does **not** re-target.
+
+The brush's target and the results-panel highlight / cyan outline are the same id — "the region my next action will touch" is the same as "the region I'm currently focused on."
+
+## Drag
+
+Drag accumulates pointer samples. Each sample stamps a filled disc of radius `brush_radius_px` into the stroke's temp bool mask `S`.
+
+- Between samples, the disc is swept along the straight segment (`cv2.line` with `thickness = 2 * brush_radius_px + 1`) so there are no gaps at fast cursor speeds.
+- Round caps are added with explicit disc stamps at both endpoints.
+- `S` lives in the stroke buffer only; the stored region's mask is not touched until release.
+- The stroke bbox is tracked incrementally as samples are stamped (in `BrushStroke.bbox`), so the commit path doesn't need a full `np.where(S)` pass on a multi-megapixel image.
+
+## Release
+
+Release commits per mode:
+
+- **Create**: largest connected component of `S` within the stroke bbox → `contour_vertices` → `LassoCloseCommand` with the cleaned mask + vertices.
+- **Add / Subtract**: combine `S` with the target's mask within the stroke bbox; if the result equals the target (no-op), discard. Otherwise re-derive vertices from the cleaned bbox-CC and commit a `BrushStrokeCommand`.
+- **Subtract that empties the target**: if `new_mask` has no surviving pixels, fire a `DeleteRegionCommand` instead — same code path as explicit delete, so undo + monotonic-id behavior stay unified.
+
+Vertex re-derivation always runs `largest_connected_component` + `contour_vertices` on the post-edit mask, restricted to its bounding box. Stored polygons are simple closed curves tracing the filled region's real boundary — same pipeline as [close_lasso cleanup](014-lasso-tool.md).
 
 ## Brush size
 
-A single scalar `brush_radius_px` (integer, pixels in full-resolution image space). Default `brush_radius_px = 8`. Range `[1, 100]`.
-
-- **Control.** A slider exposed via a **popover that opens on click of the Brush toolbar button**. First click of the Brush button (when the brush is already active) opens the size popover; clicking outside or pressing Escape closes it. When the brush is not active, clicking the Brush button activates the tool *and* opens the popover in one shot — one click to both select the brush and set its size.
-- Size is applied in **image-space pixels**, not display-space. Zooming in/out changes the on-screen footprint of the brush but not the pixel count painted.
-- Size is session-local; not persisted to the bundle (same reasoning as edit-mode was in [023](superseded/023-edit-mode-region-boolean-edits.md)).
+A single scalar `brush_radius_px` (integer, pixels in full-resolution image space). Default 8, range `[1, 100]`. Set via the slider + numeric input in the [brush panel](#ui-surface). Image-space — zoom changes the on-screen footprint but not the pixel count painted. Session-local; not persisted.
 
 ## Live preview
 
-- During drag, render a ghost of the accumulated `S` mask as a semi-transparent fill in the add color (green) or subtract color (red) on top of the overlay. No Kivy `Line` preview — the preview *is* the temp mask being painted.
-- Render a brush-cursor **circle** at the pointer position (radius `brush_radius_px`) at all times while the brush tool is active, even when not pressing, so the user sees the current footprint. The circle tints green when no modifier / Shift is held (add) and red when Ctrl is held (subtract) — live-tracking modifier state even before press-down.
+Drawn directly with Kivy graphics primitives (no per-move full-image RGBA blit). On press-down the canvas seeds a `_brush_preview_pts` list in image-space; each `PointerMove` appends a point. `_repaint` renders one `Line` (cap=round, joint=round) of width `radius_widget` through those points. A single draw call regardless of stroke length.
+
+A brush-cursor circle (image-space radius mapped to widget pixels) is also drawn at the pointer position whenever the brush tool is active, even between strokes, so the user can see the current footprint and mode color before pressing.
+
+Color coding (knowledge/026):
+- Add → green (`(0.2, 1.0, 0.2)`).
+- Subtract → red (`(1.0, 0.2, 0.2)`).
+- Create → blue (`(0.3, 0.6, 1.0)`).
 
 ## Escape / cancel
 
-`Escape` during an in-progress brush stroke discards `S` and exits the stroke — no history entry. Same semantics as the lasso ([014](014-lasso-tool.md)); reuses the `cancel_lasso` action name in [016 — Input Abstraction](016-input-abstraction.md). (Renaming the action to `cancel_stroke` is cosmetic; defer.)
+`Escape` during an in-progress brush or lasso stroke fires the `cancel_stroke` action which discards the in-flight buffer with no history entry. (Old `cancel_lasso` action name was renamed to `cancel_stroke` to reflect the dual use.)
 
 ## Tool switching mid-stroke
 
-If the user presses `L` while a brush stroke is in progress, or `B` while a lasso stroke is in progress, the **in-progress stroke continues on the tool it was started with** — the switch is queued and takes effect on the next press-down. No silent cancel.
+Pressing `L` while a brush stroke is in progress, or `B` while a lasso stroke is in progress: the in-progress stroke continues on the tool it was started with — the switch is queued and takes effect on the next press-down. No silent cancel.
 
-Same applies to clicking the toolbar buttons: clicking Lasso or Brush while a stroke is in flight is absorbed or queued (implementation choice), but must never commit a cross-tool stroke.
+Same applies to clicking the toolbar buttons. Rationale: once a user has started drawing, their gesture is in motion; an accidental hotkey bump shouldn't discard work that's mid-flight.
 
-Rationale: once a user has started drawing, their gesture is in motion; an accidental hotkey bump shouldn't discard work that's mid-flight. The stroke commits (or cancels via Escape) on its own terms, then the tool switch lands.
+## Freed hotkeys
 
-## Freed hotkey
-
-The `e` keybinding previously invoked `toggle_edit_mode` ([023](superseded/023-edit-mode-region-boolean-edits.md)). With edit mode removed, `e` is **freed** — no binding. Do not repurpose it silently; leaving it unbound keeps discoverability honest (nothing the user tries accidentally "works").
-
-## Delete-empties-region
-
-Identical to [023](superseded/023-edit-mode-region-boolean-edits.md) step: subtract that empties the region fires a `DeleteRegionCommand` so the undo path, monotonic ID behavior, and CSV sync are unified with explicit delete.
-
-## Overlap
-
-Brush edits are strictly per-target. Painting into pixels that other regions also claim is allowed — those pixels belong to both regions (overlap preserved per [025](025-overlapping-regions.md)). No clipping, no pixel theft.
+- `e` (was `toggle_edit_mode`) — freed, no binding. Kept honest: leaving it unbound means nothing the user types accidentally "works."
+- `Shift` / `Ctrl` modifiers (were add/subtract overrides) — no longer special-cased. The Add/Subtract toggles + Tab are the only way to set the mode.
 
 ## Commands
 
 One stroke → one command on the undo stack:
 
-- `BrushStrokeCommand(label_id, new_vertices, new_region_mask)` — functionally equivalent to the retired `RegionEditCommand` in [023](superseded/023-edit-mode-region-boolean-edits.md). Stores the pre-edit `old_vertices` + `old_region_mask` for undo.
+- `LassoCloseCommand` — fired by create mode (and the lasso tool).
+- `BrushStrokeCommand(label_id, new_vertices, new_region_mask)` — fired by add/subtract. Stores the pre-edit `old_vertices` + `old_region_mask` for undo.
 - `DeleteRegionCommand` — when a subtract empties the region.
 
 ## Validation & discard rules
 
 Silent discard (no mask change, no history entry):
 
-- Press-down on background (no target resolved).
-- Brush stamp `S` never intersects `target_mask` (no-op).
-- `new_mask == target_mask` after the boolean op.
+- Add/subtract press on background with no selected region (no target resolved).
+- Stamp `S` is empty (degenerate stroke).
+- Add: every painted pixel was already inside the target.
+- Subtract: brush never touched any target pixel.
+- Create: the cleaned CC is empty or its contour has fewer than 3 vertices.
 - Stroke canceled via `Escape`.
 
 ## UI surface
 
-Brush lives in the toolbar. Per [027 — Toolbar Hotkey Labels](027-toolbar-hotkey-labels.md) every button's shortcut is on its label:
+- The **Brush (B)** toolbar button activates the tool.
+- A separate **brush panel** appears beneath the toolbar only while the brush is active, sized to match the toolbar height. Layout, left → right: `Brush size` label · numeric input · slider · `Create (Tab)` toggle · `Add (Tab)` toggle · `Subtract (Tab)` toggle. Reuses the same `BrushPanel` widget instance across tool switches so size + mode persist.
+- The Tab hotkey (action `toggle_brush_mode`) cycles the three modes in the order shown in the panel.
 
-- **Brush (B)** — activates brush tool. Clicking the button when the brush is already active opens the **size-slider popover** (see [Brush size](#brush-size)). Tooltip spells out modifier semantics: "Shift = add, Ctrl = subtract."
-- Color-coded cursor circle makes mode obvious at a glance: green when add, red when subtract.
-- The size popover is a lightweight floating panel anchored under the Brush button — slider `[1, 100]`, current value display, closes on outside-click or Escape.
+The earlier popover-on-button-click design was dropped in favor of this inline panel — easier to discover and doesn't disappear when the user moves the mouse.
+
+## Performance
+
+The commit path is bbox-restricted: connected-component analysis and contour re-derivation run on the cropped post-edit mask, not the full image. On a 16 MP image with a small region the commit takes ~60 ms (down from a multi-second timeout pre-optimization). The live preview costs one Kivy `Line` draw per `_repaint`. The `ResultsTable` widget gates its rebuild on `regions_version` so brush-stroke notifies don't rebuild every row each `PointerMove`.
 
 ## Not in MVP
 
-- Variable-size brush via shortcut (`[` / `]`). Toolbar numeric field only.
+- Variable-size brush via shortcut (`[` / `]`). Toolbar slider only.
 - Pressure sensitivity (stylus). Future.
 - Brush hardness / soft edges. Binary paint only.
-- Multi-region paint (painting touches multiple regions in one stroke). Locked target only.
-- Creating a new region via brush — still the lasso's job, per [013](013-minimal-toolset.md).
+- Multi-region paint (one stroke editing multiple regions). Locked target only.
 
 ## Removed by this note
 
-- **Edit mode toggle** (`e` hotkey, `state.edit_mode`, `MaskService.set_edit_mode` / `toggle_edit_mode`). Gone — tool selection replaces it.
-- **Boundary-crossing detection** (`find_boundary_crossings`, P/Q truncation, `rasterize_stroke_polygon`). Gone — brush paints a raster patch directly.
-- **Start-side heuristic** (press-down inside target → add, outside → subtract). Gone — modifier keys are explicit.
-- **RegionEditCommand** — renamed to `BrushStrokeCommand` for clarity.
-
-Implementation still needs to delete `find_boundary_crossings`, `rasterize_stroke_polygon`, `edit_region_stroke`, `state.edit_mode`, and the edit-mode toolbar button. Tracked under the toolbar overhaul.
+- **Edit mode toggle** (`e` hotkey, `state.edit_mode`, `MaskService.set_edit_mode` / `toggle_edit_mode`). Tool selection replaces it.
+- **Boundary-crossing detection** (`find_boundary_crossings`, P/Q truncation, `rasterize_stroke_polygon`). Brush paints a raster patch directly.
+- **Start-side heuristic** (press-down inside target → add, outside → subtract). Replaced by the explicit mode toggle.
+- **RegionEditCommand** — renamed to `BrushStrokeCommand`.
+- **Modifier overrides** (`Shift` / `Ctrl` at press-down). Replaced by the toggle + Tab.
+- **`PointerDown.modifiers` field** and the `Window.modifiers` plumbing in `DesktopInputAdapter`. No longer needed.
+- **"Brush cannot create" invariant.** Create mode is the new third option.
 
 ## Related
 
-- [014 — Lasso Tool](014-lasso-tool.md) — new-region creation, the other tool.
+- [014 — Lasso Tool](014-lasso-tool.md) — outline-trace creation, the other tool.
 - [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) — superseded model.
 - [003 — Undo/Redo Commands](003-undo-redo-commands.md) — `BrushStrokeCommand`.
-- [013 — Minimal Toolset](013-minimal-toolset.md) — scope lock updated for two primitives.
-- [016 — Input Abstraction](016-input-abstraction.md) — modifier-key plumbing in `PointerDown`.
+- [013 — Minimal Toolset](013-minimal-toolset.md) — scope lock.
+- [016 — Input Abstraction](016-input-abstraction.md) — semantic events + keybindings.
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — per-target edit invariant.
-- [027 — Toolbar Hotkey Labels](027-toolbar-hotkey-labels.md) — surfacing shortcuts in buttons.
+- [027 — Toolbar Hotkey Labels](027-toolbar-hotkey-labels.md) — labels and the Tab cycle.

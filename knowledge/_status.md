@@ -1,12 +1,12 @@
-# Status — 2026-04-19 (session 4 update)
+# Status — 2026-04-19 (session 6 update)
 
 Session-handoff doc. Updated at the end of each working session. What follows `knowledge/` conventions — kept short on purpose.
 
 ## Currently working on
-- Nothing in flight at end of session 4. Rendering perf, lasso close cleanup, and the editing-model spec pivot all landed this session.
+- Nothing in flight at end of session 6. Brush model is fully implemented, perf-tuned, and revised through several rounds of UX iteration.
 
 ## In progress (started, not done)
-- **Brush implementation.** Spec is locked in [026](026-brush-edit-model.md) but code still reflects [023](superseded/023-edit-mode-region-boolean-edits.md): `state.edit_mode`, the `e` hotkey, `find_boundary_crossings`, `rasterize_stroke_polygon`, `edit_region_stroke`, `RegionEditCommand`, and the edit-mode toolbar button are all still present. Next session: implement [026](026-brush-edit-model.md) and tear these out in the same pass.
+- None.
 
 ## Blocked (waiting on external input or deferred decisions)
 - **Mask export output location + CLI.** User wants to pick `out_dir` and a CLI wrapper "later." Format contract is locked ([024](024-mask-export-deferred.md)); placement and ergonomics deferred.
@@ -14,15 +14,20 @@ Session-handoff doc. Updated at the end of each working session. What follows `k
 - **macOS validation.** Not an MVP target, intentionally deferred ([020](020-platform-scope.md)).
 
 ## Next actions (concrete, ordered)
-1. **Implement brush tool** per [026](026-brush-edit-model.md). New `BrushStrokeCommand` (rename of `RegionEditCommand`); `MaskService.apply_brush_stroke(label_id, stamp_mask, mode)`; canvas wires brush press-drag with modifier capture at press-down; live preview ghost of the stamp mask; cursor circle tints green/red by modifier state. Press-down also sets `state.selected_region_id` to the resolved brush target (unifies selection highlight with brush target). Tool-switch mid-stroke: in-progress stroke keeps running on the tool it was started with; switch takes effect on next press-down. Delete: old `edit_region_stroke`, `find_boundary_crossings`, `rasterize_stroke_polygon`, `state.edit_mode`, `set_edit_mode` / `toggle_edit_mode`, `e` hotkey (freed, not rebound), edit-mode toolbar button, `tests/ui/test_image_canvas_edit.py`.
-2. **Tool selector in toolbar** — replace the edit-mode toggle with a two-button tool selector (Lasso / Brush). Session state gains `active_tool: Literal["lasso", "brush"]` (default `"lasso"`). `L` and `B` hotkeys.
-3. **Brush size popover.** Slider `[1, 100]`, default 8. Opens on click of the Brush toolbar button (activates brush + opens in one shot when the tool isn't active; opens alone when it already is). Closes on outside-click or Escape.
-4. **Toolbar hotkey labels** per [027](027-toolbar-hotkey-labels.md). Helper: `keybinding_for_action(name) → "Ctrl+S"`. Apply to every existing button.
-5. **Double-click to open in file picker** per [028](028-file-picker-double-click.md). Bind `on_submit` on the Kivy FileChooser to the load callback.
-6. **Mask export** (`bacmask/services/mask_export.py`). Headless, deferred until a consuming training pipeline is chosen.
-7. **Region rename.** Users can't change `region_01` / `region_02` names today. Inline edit in the results panel. Post-MVP.
+1. **Mask export** (`bacmask/services/mask_export.py`). Headless, deferred until a consuming training pipeline is chosen ([024](024-mask-export-deferred.md)).
+2. **Region rename.** Users can't change `region_01` / `region_02` names today. Inline edit in the results panel. Post-MVP.
+3. **Bundle/area save fixtures.** When the brush save-flow stabilizes in user hands, add a regression test that round-trips a brush-edited region and asserts the polygon survives bit-identically.
 
 ## Recently completed (last ~3 sessions)
+- **Brush model — full session arc (session 6).** Implemented [026](026-brush-edit-model.md) end-to-end and then iterated heavily based on live use:
+  - **First cut (modifier-key model).** `BrushStrokeCommand` replaces `RegionEditCommand`. `MaskService.begin_brush_stroke / add_brush_sample / end_brush_stroke / cancel_brush_stroke`. Disc stamp + `cv2.line` sweep with rounded caps for gap-free fast strokes. Tool toggles in the toolbar (Lasso / Brush), `L` / `B` hotkeys, `e` freed. Old `edit_region_stroke`, `find_boundary_crossings`, `rasterize_stroke_polygon`, `state.edit_mode`, edit toolbar button, `RegionEditCommand` all deleted.
+  - **Subtract bug fix.** Adapter's mirrored `_modifiers` was never populated because the App owns `Window.on_key_down`. Switched to reading `Window.modifiers` directly at press-down. (Later removed entirely — see below.)
+  - **Performance.** Live-preview ghost was rebuilding a full-image RGBA texture per `PointerMove` — replaced with a single `kivy.graphics.Line` (cap=round, joint=round) drawn from a canvas-local `_brush_preview_pts` list. Commit path: bbox-tracked stroke (no full `np.where(s_mask)` at commit), bbox-cropped CC + `findContours`, `target_mask.copy()` + in-place bbox boolean ops, dropped the defensive `.copy()` in `BrushStrokeCommand.apply` and the `np.zeros_like` allocation. End-to-end commit at 16 MP went from "perceptible delay" to ~60 ms. `ResultsTable` gates its rebuild on `regions_version` so brush-stroke notifies don't rebuild every row.
+  - **Selection lock.** `begin_brush_stroke` revised: hit on existing region selects + targets; press on background uses `state.selected_region_id` as target; both empty → no-op. This is what enables subtract-from-outside.
+  - **UI restructure.** Calibration moved inline at the right end of the toolbar (next to the Brush button). New `BrushPanel` widget below the toolbar, only shown when `active_tool == "brush"`: brush-size slider + numeric + `Add` / `Subtract` toggles (+ later `Create`).
+  - **Modifier model removed.** Dropped `Shift` / `Ctrl` overrides entirely. Mode is now a persistent toolbar setting (`state.brush_default_mode`) cycled with `Tab`. `PointerDown.modifiers` removed; adapter's `_modifiers` mirror + `_window_modifiers` removed.
+  - **Create mode added.** Third brush mode: press-drag-release commits a brand-new region from the painted blob via `LassoCloseCommand` (largest-CC + contour cleanup, same pipeline as the lasso tool). `BrushStroke.target_id` is now `int | None` (None for create). Tab cycles `create → add → subtract → create`. Brush panel reordered so Create is first. Canvas previews tint blue for create, green for add, red for subtract.
+  - **Test suite.** 173 → 202 passing. New tests cover brush stamp helpers, mode toggles, Tab cycle, selection lock + subtract-from-outside, create mode (commits a new region, ignores existing regions, undo, doesn't change selection). Ruff + format clean throughout.
 - **Lasso dashed closing chord (session 5).** `ImageCanvas._repaint` now draws a dashed yellow line from the current cursor (`_last_pointer_pos`) to `active_lasso[0]` while a lasso is in progress. Pure visual preview of the snap-close chord — no service / commit path change. `cv2.fillPoly` already closes the polygon implicitly on release, so the rasterized region matches what the dashed line shows the user.
 - **Rendering perf pass (session 4).**
   - `SessionState.regions_version` — monotonic counter bumped by every region-mutating command and by `load_bundle`/`set_image`. Canvas gates overlay-texture rebuild on it. Selection / mode / calibration notifies no longer rebuild the full-res RGBA composite.

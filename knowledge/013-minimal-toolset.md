@@ -13,10 +13,10 @@ related: [000, 014, 026, 027]
 ## Decision
 MVP ships with **two mask primitives**:
 
-- **Lasso** — creates new regions. Press-drag-release on background; closes on release. See [014 — Lasso Tool](014-lasso-tool.md).
-- **Brush** — modifies existing regions. Press-drag-release on the region to edit, with `Shift` to add paint and `Ctrl` to subtract. See [026 — Brush Edit Model](026-brush-edit-model.md).
+- **Lasso** — outline-trace creation. Press-drag-release; closes on release. See [014 — Lasso Tool](014-lasso-tool.md).
+- **Brush** — three-mode painting tool. The **mode** (`create` / `add` / `subtract`) is a persistent toolbar setting cycled with `Tab`. Create makes a new region from the painted blob; add/subtract edit the locked target. See [026 — Brush Edit Model](026-brush-edit-model.md).
 
-Exactly one of these is active at a time. The user switches via the toolbar or hotkey (`L` for lasso, `B` for brush). There is **no separate edit-mode toggle** — tool selection is the mode. The old lasso-against-region edit gesture from [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) is superseded.
+Exactly one tool is active at a time. The user switches via the toolbar or hotkey (`L` for lasso, `B` for brush). There is **no separate edit-mode toggle** — tool selection is the mode. The old lasso-against-region edit gesture from [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) is superseded.
 
 Supporting global actions:
 - **Undo / redo** ([003](003-undo-redo-commands.md))
@@ -35,21 +35,22 @@ That's it.
 ## Supersedes earlier drafts
 - **Draft 1 (2026-04-17):** brush + eraser + flood fill as the three MVP tools. Dropped when the model shifted to boundary-contour drawing.
 - **Draft 2 (2026-04-19):** lasso-only, with an "edit mode" toggle that reused the lasso gesture for add/subtract stroke edits ([023](superseded/023-edit-mode-region-boolean-edits.md)). Dropped after live-UI feedback: the two-boundary-crossings requirement silently discarded too many user strokes.
-- **Current (2026-04-19):** lasso for create, brush for edit. The brush is back — but only for editing existing regions, not creating them. New-region creation is still lasso-only ([026](026-brush-edit-model.md)).
+- **Draft 3 (2026-04-19):** lasso for create, brush for edit only (Shift add / Ctrl subtract). Dropped after iteration: modifier resolution at press-down was fragile and the gesture was harder to teach than a persistent toggle. The "brush cannot create" invariant was also dropped.
+- **Current (2026-04-19):** lasso for outline-trace creation, brush as a three-mode painting tool (`create / add / subtract`) cycled with `Tab` ([026](026-brush-edit-model.md)).
 
 ## Rationale
 
 ### Two primitives, one job each
 Lasso handles "I'm outlining a new colony" — a continuous-trace gesture. Brush handles "I need to nudge this boundary a bit" — a per-pixel painting gesture. Trying to stuff both jobs into one gesture (lasso-against-region in [023](superseded/023-edit-mode-region-boolean-edits.md)) conflated them and confused users. Two explicit tools are clearer than one overloaded one.
 
-### Brush is *only* for edits
-The brush cannot create a region — painting onto background does nothing. This preserves the "lasso is the authoritative creation path" invariant and keeps the mental model simple: the thing under your cursor at press-down decides what happens.
+### Brush has three modes — including create
+The brush can also create regions (in `create` mode). The lasso is still the right tool for outline-trace creation (you draw a boundary, get exactly that shape); the brush-create flow is for "paint a blob" creation where the user thinks in terms of filled area rather than a closed curve. Both pipelines end in the same `LassoCloseCommand` after the largest-CC + contour cleanup.
 
 ### Scope discipline protects the project
 Every additional tool (threshold, watershed, magic select, smart edge) pulls the product toward "general image editor" — which BacMask is explicitly **not**. Adding tools is a one-way door. Brush is allowed because it directly serves the boundary-refinement use case that the lasso-edit gesture failed at; no other tool gets that justification yet.
 
 ## Explicitly NOT in MVP
-- Eraser as a separate tool — `Ctrl`-brush already does this.
+- Eraser as a separate tool — brush in `subtract` mode already does this.
 - Flood fill / magic wand
 - Threshold / binarize
 - Edge detection (Canny, Sobel)

@@ -15,22 +15,27 @@ Decouple gesture/input handling from domain commands so desktop ↔ touch profil
 All raw gestures are translated into a small vocabulary of **semantic input events** at `bacmask/ui/input/`. Widgets and services consume the semantic events — they never see raw Kivy events.
 
 ## Semantic events (MVP)
-- `PointerDown(pos, modifiers)`
+- `PointerDown(pos, is_double=False)` — no `modifiers` field. The brush model ([026](026-brush-edit-model.md)) used to consume modifier state at press-down via Kivy's `Window.modifiers`, but that plumbing was removed when the brush switched to a persistent toggle (Add / Subtract / Create) cycled with `Tab`.
 - `PointerMove(pos)`
 - `PointerUp(pos)`
 - `Zoom(center, delta)` — wheel on desktop; pinch on touch (future).
-- `Pan(delta)` — right-drag / gesture.
-- `Action(name)` — e.g. `"close_lasso"`, `"cancel_lasso"`, `"delete_region"`, `"undo"`, `"redo"`, `"save_all"`, `"load"`.
+- `Pan(delta)` — middle-mouse drag / gesture.
+- `Action(name)` — e.g. `"close_lasso"`, `"cancel_stroke"`, `"delete_region"`, `"undo"`, `"redo"`, `"save_bundle"`, `"export_csv"`, `"load_image"`, `"select_lasso"`, `"select_brush"`, `"toggle_brush_mode"`.
 
 ## Adapters
 - `DesktopInputAdapter` — translates Kivy mouse/keyboard events.
   - Left-drag → pointer sequence.
+  - Middle-drag → `Pan`.
   - Wheel → `Zoom`.
   - `Enter` → `Action("close_lasso")`.
-  - `Escape` → `Action("cancel_lasso")`.
-  - `Delete` → `Action("delete_region")`.
-  - `Ctrl+Z` / `Ctrl+Shift+Z` → `Action("undo" | "redo")`.
-  - `Ctrl+S` → `Action("save_all")`.
+  - `Escape` → `Action("cancel_stroke")` — cancels whichever stroke is in flight (lasso or brush).
+  - `Delete` / `Backspace` → `Action("delete_region")`.
+  - `Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` → `Action("undo" | "redo")`.
+  - `Ctrl+S` → `Action("save_bundle")`.
+  - `Ctrl+E` → `Action("export_csv")`.
+  - `Ctrl+O` → `Action("load_image")`.
+  - `L` / `B` → `Action("select_lasso" | "select_brush")`.
+  - `Tab` → `Action("toggle_brush_mode")` — cycles `create → add → subtract → create`.
 - `TouchInputAdapter` (future, post-MVP — see [020](020-platform-scope.md)) — multi-touch gestures.
   - Single-finger drag → pointer sequence.
   - Two-finger pinch → `Zoom`.
