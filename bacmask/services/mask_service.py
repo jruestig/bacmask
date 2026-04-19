@@ -4,7 +4,8 @@ The UI calls only methods here — never core commands or io_manager directly.
 Owns a SessionState and a history stack; exposes intent-based actions and
 notifies subscribers on every state change.
 
-See knowledge/001 (separation), 002 (state), 003 (commands), 014 (lasso).
+See knowledge/001 (separation), 002 (state), 003 (commands), 014 (lasso),
+026 (brush).
 """
 
 from __future__ import annotations
@@ -16,16 +17,86 @@ from pathlib import Path
 
 import numpy as np
 
+from bacmask.config import defaults
 from bacmask.core import area, calibration, io_manager, masking
 from bacmask.core.commands import (
+    BrushStrokeCommand,
     DeleteRegionCommand,
     LassoCloseCommand,
     VertexEditCommand,
 )
 from bacmask.core.history import UndoRedoStack
-from bacmask.core.state import SessionState
+from bacmask.core.state import BrushStroke, SessionState, Tool
 
 log = logging.getLogger(__name__)
+
+
+def _disc_bbox(cx: int, cy: int, r: int, h: int, w: int) -> tuple[int, int, int, int]:
+    """Half-open (y0, y1, x0, x1) bbox of a disc clipped to image bounds."""
+    y0 = max(0, cy - r)
+    y1 = min(h, cy + r + 1)
+    x0 = max(0, cx - r)
+    x1 = min(w, cx + r + 1)
+    return y0, y1, x0, x1
+
+
+def _segment_bbox(
+    a: tuple[int, int],
+    b: tuple[int, int],
+    r: int,
+    h: int,
+    w: int,
+) -> tuple[int, int, int, int]:
+    """Half-open bbox of a swept disc along segment ``a → b``, clipped to image."""
+    ax, ay = a
+    bx, by = b
+    y0 = max(0, min(ay, by) - r)
+    y1 = min(h, max(ay, by) + r + 1)
+    x0 = max(0, min(ax, bx) - r)
+    x1 = min(w, max(ax, bx) + r + 1)
+    return y0, y1, x0, x1
+
+
+def _expand_bbox(
+    a: tuple[int, int, int, int] | None,
+    b: tuple[int, int, int, int],
+) -> tuple[int, int, int, int]:
+    """Union of two half-open bboxes; ``None`` means take ``b`` as-is."""
+    if a is None:
+        return b
+    return (
+        min(a[0], b[0]),
+        max(a[1], b[1]),
+        min(a[2], b[2]),
+        max(a[3], b[3]),
+    )
+
+
+def _any_outside_bbox(
+    mask: np.ndarray,
+    y0: int,
+    y1: int,
+    x0: int,
+    x1: int,
+) -> bool:
+    """True iff any True pixel of ``mask`` lies outside the rectangle [y0:y1, x0:x1].
+
+    Used by the brush commit fast-path to decide whether a subtract that
+    emptied the stroke bbox actually emptied the entire region. Avoids a full
+    ``mask.any()`` scan when the bbox already covers most of the image: each
+    side strip is at most one row/column tall, so the total work is O(H + W)
+    in the worst case (and short-circuits on the first hit).
+    """
+    h, w = mask.shape
+    if y0 > 0 and mask[:y0, :].any():
+        return True
+    if y1 < h and mask[y1:, :].any():
+        return True
+    if x0 > 0 and mask[y0:y1, :x0].any():
+        return True
+    if x1 < w and mask[y0:y1, x1:].any():
+        return True
+    return False
 
 
 class MaskService:
@@ -83,11 +154,36 @@ class MaskService:
         self.state.next_label_id = bundle.meta.next_label_id
         self.state.scale_mm_per_px = bundle.meta.scale_mm_per_px
         self.state.active_lasso = None
+        self.state.active_brush_stroke = None
         self.state.selected_region_id = None
         self.state.dirty = False
         self.state.regions_version += 1
         self.history.clear()
         self._active_lasso = []
+        self._notify()
+
+    # ---- tool selection -----------------------------------------------------
+
+    def set_active_tool(self, tool: Tool) -> None:
+        """Set the active editing tool. In-flight strokes are not cancelled —
+        per knowledge/026, a started stroke completes on its own terms; the
+        switch lands on the next press-down.
+        """
+        if tool not in ("lasso", "brush"):
+            raise ValueError(f"unknown tool: {tool!r}")
+        if self.state.active_tool == tool:
+            return
+        self.state.active_tool = tool
+        self._notify()
+
+    def set_brush_radius(self, radius: int) -> None:
+        r = int(radius)
+        lo, hi = defaults.BRUSH_RADIUS_MIN_PX, defaults.BRUSH_RADIUS_MAX_PX
+        if not (lo <= r <= hi):
+            raise ValueError(f"brush radius {r} out of range [{lo}, {hi}]")
+        if self.state.brush_radius_px == r:
+            return
+        self.state.brush_radius_px = r
         self._notify()
 
     # ---- lasso --------------------------------------------------------------
@@ -111,24 +207,49 @@ class MaskService:
         self._notify()
 
     def close_lasso(self) -> int | None:
-        """Commit the in-progress lasso. Returns label_id or None if discarded."""
-        if len(self._active_lasso) < 3:
+        """Commit the in-progress lasso. Returns label_id or None if discarded.
+
+        The stored polygon is re-derived from the rasterized stroke: the raw
+        path is filled (``cv2.fillPoly`` even-odd), reduced to its largest
+        connected component (same deterministic tiebreak as the brush edit
+        commit, knowledge/026), and its outer contour becomes the canonical
+        vertex list. This kills the "random chord on release" artifact — the
+        user's release point and any self-intersecting scribble lobes no
+        longer leak into the stored shape.
+        """
+
+        def _discard() -> None:
             self._active_lasso = []
             self.state.active_lasso = None
             self._notify()
+
+        if len(self._active_lasso) < 3:
+            _discard()
             return None
-        verts = np.asarray(self._active_lasso, dtype=np.int32)
-        enclosed_area = masking.polygon_area(verts)
-        if enclosed_area <= 0.0:
+        if self.state.label_map is None:
+            _discard()
+            return None
+        raw_verts = np.asarray(self._active_lasso, dtype=np.int32)
+        if masking.polygon_area(raw_verts) <= 0.0:
             log.warning(
                 "lasso discarded: polygon with %d vertices encloses zero area",
-                len(verts),
+                len(raw_verts),
             )
-            self._active_lasso = []
-            self.state.active_lasso = None
-            self._notify()
+            _discard()
             return None
-        cmd = LassoCloseCommand(verts)
+
+        image_shape = self.state.label_map.shape
+        raw_mask = masking.rasterize_polygon_mask(raw_verts, image_shape)
+        clean_mask = masking.largest_connected_component(raw_mask)
+        if not clean_mask.any():
+            _discard()
+            return None
+        clean_verts = masking.contour_vertices(clean_mask)
+        if len(clean_verts) < 3:
+            _discard()
+            return None
+
+        cmd = LassoCloseCommand(clean_verts, region_mask=clean_mask)
         self.history.push(cmd, self.state)
         self._active_lasso = []
         self.state.active_lasso = None
@@ -147,104 +268,204 @@ class MaskService:
         self.history.push(cmd, self.state)
         self._notify()
 
-    # ---- region edit stroke (add / subtract) --------------------------------
+    # ---- brush stroke (knowledge/026) ---------------------------------------
 
-    def edit_region_stroke(
+    def begin_brush_stroke(
         self,
-        target_id: int,
-        samples: Sequence[tuple[int, int]] | np.ndarray,
-    ) -> str | None:
-        """Apply an add/subtract stroke to ``target_id``.
+        pos: tuple[int, int],
+        modifiers: Sequence[str] = (),
+    ) -> int | None:
+        """Begin a brush stroke at image-space ``pos``.
 
-        Implements the algorithm in knowledge/023: detect add vs. subtract
-        from the press-down sample, find the first two boundary crossings,
-        truncate + close the open polyline, rasterize into a mask ``S``, then
-        ``target | S`` (add) or ``target & ~S`` (subtract). Multi-piece
-        results are filtered to the largest connected component (deterministic
-        tiebreak on smallest ``(y, x)`` pixel). Empty result routes through
-        :class:`DeleteRegionCommand` so the region is removed cleanly.
+        Resolves the target region from the press-down pixel via ``label_map``
+        (highest-id wins on overlap). Modifier keys decide add vs. subtract:
+        no modifier or ``shift`` → add; ``ctrl`` → subtract (Ctrl wins over
+        Shift).
+
+        Returns the locked target label_id, or ``None`` if the press-down hit
+        background (no-op, no history). On success, ``selected_region_id`` is
+        also set to the target.
+        """
+        if self.state.label_map is None:
+            return None
+        ix, iy = int(pos[0]), int(pos[1])
+        h, w = self.state.label_map.shape
+        if not (0 <= ix < w and 0 <= iy < h):
+            return None
+        target = int(self.state.label_map[iy, ix])
+        if target == 0 or target not in self.state.regions:
+            return None
+
+        mods = {m.lower() for m in modifiers}
+        mode = "subtract" if "ctrl" in mods else "add"
+
+        r = self.state.brush_radius_px
+        stroke_mask = np.zeros((h, w), dtype=bool)
+        masking.stamp_brush_disc(stroke_mask, (ix, iy), r)
+        self.state.active_brush_stroke = BrushStroke(
+            target_id=target,
+            mode=mode,
+            mask=stroke_mask,
+            last_pos=(ix, iy),
+            bbox=_disc_bbox(ix, iy, r, h, w),
+        )
+        if self.state.selected_region_id != target:
+            self.state.selected_region_id = target
+        self._notify()
+        return target
+
+    def add_brush_sample(self, pos: tuple[int, int]) -> None:
+        """Add a pointer sample to the in-progress brush stroke.
+
+        Sweeps a disc along the segment from the last sample to ``pos`` so
+        fast cursor moves leave no gaps (knowledge/026 step 3). Updates the
+        stroke bbox in lockstep so the commit path can skip a full
+        ``np.where`` pass on the stroke mask.
+        """
+        stroke = self.state.active_brush_stroke
+        if stroke is None:
+            return
+        ix, iy = int(pos[0]), int(pos[1])
+        r = self.state.brush_radius_px
+        prev = stroke.last_pos
+        masking.stamp_brush_segment(stroke.mask, prev, (ix, iy), r)
+        stroke.last_pos = (ix, iy)
+        h, w = stroke.mask.shape
+        stroke.bbox = _expand_bbox(stroke.bbox, _segment_bbox(prev, (ix, iy), r, h, w))
+        self._notify()
+
+    def cancel_brush_stroke(self) -> None:
+        if self.state.active_brush_stroke is None:
+            return
+        self.state.active_brush_stroke = None
+        self._notify()
+
+    def end_brush_stroke(self) -> str | None:
+        """Commit the in-progress brush stroke.
 
         Returns one of:
+        * ``"added"`` — add stroke committed.
+        * ``"subtracted"`` — subtract stroke committed.
+        * ``"deleted"`` — subtract emptied the region; routed via DeleteRegionCommand.
+        * ``None`` — discarded silently (no intersection or no-op).
 
-        * ``"added"`` — an add stroke was committed.
-        * ``"subtracted"`` — a subtract stroke was committed.
-        * ``"deleted"`` — the subtract emptied the region; delete was applied.
-        * ``None`` — the stroke was discarded silently.
+        The connected-component pass and contour re-derivation are restricted
+        to the bounding box of the post-edit mask — for a small region in a
+        large image this is the difference between operating on a few hundred
+        pixels and a few million. The full-image mask is only built (in place
+        from the target snapshot) when something actually changes.
         """
-        # Local imports — the top-of-file import block is reserved for another
-        # concurrent refactor (knowledge/023 integration note).
-        from bacmask.core.commands import DeleteRegionCommand, RegionEditCommand
-
-        if target_id not in self.state.regions:
-            raise KeyError(f"region {target_id} does not exist")
-        if self.state.label_map is None:
-            raise ValueError("state.label_map is not initialized")
-
-        pts = np.asarray(samples, dtype=np.int32).reshape(-1, 2)
-        if len(pts) < 3:
+        stroke = self.state.active_brush_stroke
+        if stroke is None:
             return None
+        # Always clear the stroke buffer at the start of commit — even on
+        # discard paths there must be no leftover ghost.
+        self.state.active_brush_stroke = None
 
-        image_shape = self.state.label_map.shape
-        h, w = image_shape
+        target_id = stroke.target_id
+        if target_id not in self.state.regions:
+            self._notify()
+            return None
         target_mask = self.state.region_masks.get(target_id)
         if target_mask is None:
-            target_mask = np.zeros(image_shape, dtype=bool)
-
-        # Mode from the press-down sample. Out-of-bounds => outside.
-        x0, y0 = int(pts[0, 0]), int(pts[0, 1])
-        if 0 <= x0 < w and 0 <= y0 < h and bool(target_mask[y0, x0]):
-            mode = "add"
-        else:
-            mode = "subtract"
-
-        p, q = masking.find_boundary_crossings(pts, target_mask)
-        if p is None or q is None:
-            return None
-
-        # Samples[P+1 : Q+1] — from the first sample on the other side through
-        # the first sample back on the origin side (inclusive).
-        segment = pts[p + 1 : q + 1]
-        if len(segment) < 3:
-            return None
-
-        s_mask = masking.rasterize_stroke_polygon(segment, image_shape)
-        if not s_mask.any():
-            return None
-
-        if mode == "add":
-            new_mask = target_mask | s_mask
-        else:
-            new_mask = target_mask & ~s_mask
-
-        # Bitwise no-op => discard.
-        if np.array_equal(new_mask, target_mask):
-            return None
-
-        # Empty result => route through DeleteRegionCommand so the existing
-        # undo path + monotonic-id behavior apply uniformly.
-        if not new_mask.any():
-            cmd = DeleteRegionCommand(label_id=target_id)
-            self.history.push(cmd, self.state)
-            if self.state.selected_region_id == target_id:
-                self.state.selected_region_id = None
             self._notify()
-            return "deleted"
-
-        # Keep the largest connected component (deterministic tiebreak).
-        filtered = masking.largest_connected_component(new_mask)
-        new_vertices = masking.contour_vertices(filtered)
-        if len(new_vertices) < 3:
-            # Contour too small to form a polygon — discard silently.
             return None
 
-        edit_cmd = RegionEditCommand(
+        s_mask = stroke.mask
+        # Stroke bbox is tracked incrementally during sampling — no full
+        # ``np.where(s_mask)`` pass needed at commit time, which is a sizeable
+        # win on large images.
+        if stroke.bbox is None:
+            self._notify()
+            return None
+        sy0, sy1, sx0, sx1 = stroke.bbox
+        if sy0 >= sy1 or sx0 >= sx1:
+            self._notify()
+            return None
+
+        target_crop = target_mask[sy0:sy1, sx0:sx1]
+        s_crop = s_mask[sy0:sy1, sx0:sx1]
+        if not s_crop.any():
+            self._notify()
+            return None
+
+        # No-op detection on the crop (cheap):
+        #   add      → no painted pixel lay outside the target
+        #   subtract → brush never touched any target pixel
+        if stroke.mode == "add":
+            if not (s_crop & ~target_crop).any():
+                self._notify()
+                return None
+        else:
+            if not (s_crop & target_crop).any():
+                self._notify()
+                return None
+
+        # Apply the boolean op in place on a copy of the target mask, but only
+        # within the stroke bbox — the rest of the mask is identical to the
+        # target by construction.
+        new_mask = target_mask.copy()
+        if stroke.mode == "add":
+            np.bitwise_or(target_crop, s_crop, out=new_mask[sy0:sy1, sx0:sx1])
+        else:
+            np.logical_and(target_crop, ~s_crop, out=new_mask[sy0:sy1, sx0:sx1])
+
+        # Subtract emptied the region → route via DeleteRegionCommand so the
+        # undo path + monotonic-id behavior are unified with explicit delete.
+        # Cheap check: subtract result is bounded by target, so only the bbox
+        # needs inspecting.
+        if stroke.mode == "subtract" and not new_mask[sy0:sy1, sx0:sx1].any():
+            # The subtract emptied the stroke bbox; need to confirm nothing
+            # else remains outside the bbox. Outside the bbox new_mask equals
+            # target_mask, so an "empty" outcome requires target outside bbox
+            # to also be empty — i.e. target was entirely inside the bbox.
+            if not _any_outside_bbox(target_mask, sy0, sy1, sx0, sx1):
+                cmd = DeleteRegionCommand(label_id=target_id)
+                self.history.push(cmd, self.state)
+                if self.state.selected_region_id == target_id:
+                    self.state.selected_region_id = None
+                self._notify()
+                return "deleted"
+
+        # Bbox of the post-edit mask. For subtract this is ⊆ target's bbox;
+        # for add it's union(target_bbox, stroke_bbox). Computing it via
+        # np.where on the full mask is one more O(HxW) pass — acceptable, and
+        # the CC / contour ops on the resulting crop are tiny by comparison.
+        n_ys, n_xs = np.where(new_mask)
+        if len(n_ys) == 0:
+            # Defensive — handled by the subtract branch above, but covers add
+            # edge cases too.
+            self._notify()
+            return None
+        ny0, ny1 = int(n_ys.min()), int(n_ys.max()) + 1
+        nx0, nx1 = int(n_xs.min()), int(n_xs.max()) + 1
+
+        crop = new_mask[ny0:ny1, nx0:nx1]
+        filtered_crop = masking.largest_connected_component(crop)
+        if not filtered_crop.any():
+            self._notify()
+            return None
+        crop_verts = masking.contour_vertices(filtered_crop)
+        if len(crop_verts) < 3:
+            self._notify()
+            return None
+
+        # Paste the filtered CC back into the full mask. Outside the new-mask
+        # bbox there is nothing (by definition of bbox), so a fresh zero mask
+        # + bbox paste is exact.
+        filtered = np.zeros_like(new_mask)
+        filtered[ny0:ny1, nx0:nx1] = filtered_crop
+        # Translate vertex coords from crop-space back to image-space.
+        new_vertices = crop_verts + np.array([nx0, ny0], dtype=np.int32)
+
+        edit_cmd = BrushStrokeCommand(
             label_id=target_id,
             new_vertices=new_vertices,
             new_region_mask=filtered,
         )
         self.history.push(edit_cmd, self.state)
         self._notify()
-        return "added" if mode == "add" else "subtracted"
+        return "added" if stroke.mode == "add" else "subtracted"
 
     # ---- delete -------------------------------------------------------------
 
@@ -284,25 +505,6 @@ class MaskService:
         if ok:
             self._notify()
         return ok
-
-    # ---- edit mode ----------------------------------------------------------
-
-    def toggle_edit_mode(self) -> bool:
-        """Flip the edit-mode flag. Returns the new value."""
-        self.state.edit_mode = not self.state.edit_mode
-        # Any in-progress lasso is ambiguous across a mode flip.
-        self._active_lasso = []
-        self.state.active_lasso = None
-        self._notify()
-        return self.state.edit_mode
-
-    def set_edit_mode(self, enabled: bool) -> None:
-        if self.state.edit_mode == enabled:
-            return
-        self.state.edit_mode = enabled
-        self._active_lasso = []
-        self.state.active_lasso = None
-        self._notify()
 
     # ---- calibration --------------------------------------------------------
 

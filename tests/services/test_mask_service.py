@@ -85,6 +85,28 @@ def test_cancel_lasso_clears_buffer(tmp_path):
     assert len(svc.history) == 0
 
 
+def test_close_lasso_stores_raster_derived_contour(tmp_path):
+    """Stored vertices come from ``cv2.findContours`` on the rasterized mask —
+    not from the raw user scribble. This kills the "random connection on
+    release" artifact: any implicit chord from last-point-to-first-point is
+    dissolved by going through the raster, so the stored polygon is always a
+    clean simple closed curve tracing the filled region's actual boundary.
+    """
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    # A reasonable outline that *doesn't* return exactly to the start — this
+    # is the realistic "user released away from start" case. Before the
+    # cleanup, the implicit chord (last → first) introduced a diagonal edge
+    # that could sit inside the drawn shape.
+    raw_verts = [(10, 10), (30, 10), (30, 30), (12, 30), (12, 15)]
+    _draw_lasso(svc, raw_verts)
+    mask = svc.state.region_masks[1]
+    # Every stored vertex lies on the rasterized region's boundary — no stray
+    # chord vertex can survive the findContours pass.
+    for x, y in svc.state.regions[1]["vertices"]:
+        assert mask[y, x], f"stored vertex ({x}, {y}) is not on the mask"
+
+
 # ---- delete ----
 
 
@@ -395,44 +417,48 @@ def test_subscribe_fires_on_state_change(tmp_path):
     assert len(calls) >= 1
 
 
-# ---- edit mode ----
+# ---- tool selection (knowledge/026) ----
 
 
-def test_toggle_edit_mode_flips_flag_and_notifies():
+def test_default_active_tool_is_lasso():
     svc = MaskService()
-    assert svc.state.edit_mode is False
-    calls: list[bool] = []
-    svc.subscribe(lambda: calls.append(svc.state.edit_mode))
-
-    assert svc.toggle_edit_mode() is True
-    assert svc.state.edit_mode is True
-    assert svc.toggle_edit_mode() is False
-    assert svc.state.edit_mode is False
-    assert calls == [True, False]
+    assert svc.state.active_tool == "lasso"
 
 
-def test_set_edit_mode_is_idempotent():
+def test_set_active_tool_brush_notifies():
+    svc = MaskService()
+    calls: list[str] = []
+    svc.subscribe(lambda: calls.append(svc.state.active_tool))
+    svc.set_active_tool("brush")
+    assert svc.state.active_tool == "brush"
+    assert calls[-1] == "brush"
+
+
+def test_set_active_tool_idempotent():
     svc = MaskService()
     calls: list[int] = []
     svc.subscribe(lambda: calls.append(1))
-
-    svc.set_edit_mode(False)  # already False
-    svc.set_edit_mode(True)
-    svc.set_edit_mode(True)  # no-op
-    svc.set_edit_mode(False)
-    # Only the two real transitions should have fired.
+    svc.set_active_tool("lasso")  # already lasso
+    svc.set_active_tool("brush")
+    svc.set_active_tool("brush")  # no-op
+    svc.set_active_tool("lasso")
     assert sum(calls) == 2
 
 
-def test_toggle_edit_mode_cancels_active_lasso(tmp_path):
+def test_set_active_tool_rejects_unknown():
     svc = MaskService()
-    svc.load_image(_write_image(tmp_path))
-    svc.begin_lasso((5, 5))
-    svc.add_lasso_point((10, 10))
-    assert svc.state.active_lasso is not None
+    with pytest.raises(ValueError):
+        svc.set_active_tool("foo")  # type: ignore[arg-type]
 
-    svc.toggle_edit_mode()
-    assert svc.state.active_lasso is None
+
+def test_set_brush_radius_clamps_and_validates():
+    svc = MaskService()
+    svc.set_brush_radius(15)
+    assert svc.state.brush_radius_px == 15
+    with pytest.raises(ValueError):
+        svc.set_brush_radius(0)
+    with pytest.raises(ValueError):
+        svc.set_brush_radius(101)
 
 
 # ---- zero-area guard ----
@@ -514,203 +540,222 @@ def test_close_lasso_discards_zero_area_polygon(tmp_path, caplog):
     assert any("zero area" in rec.message for rec in caplog.records)
 
 
-# ---- edit_region_stroke: add / subtract -------------------------------------
+# ---- brush stroke: add / subtract (knowledge/026) ---------------------------
 
 
-def _add_stroke_out_to_out(x_start_inside: int = 15, y: int = 14) -> list[tuple[int, int]]:
-    """Stroke that starts inside the (10-20, 10-20) square, exits just past
-    the right edge, loops adjacent to it, and re-enters — an 'add' stroke
-    whose outside-run rasterizes to a blob 8-connected to the region."""
-    return [
-        (x_start_inside, y),  # inside
-        (18, y),  # inside (20 is inside; 21 is outside)
-        (21, y),  # first outside sample (P between idx 1 and 2)
-        (25, y),
-        (25, y + 2),
-        (25, y + 4),
-        (21, y + 4),  # last outside sample
-        (18, y + 4),  # back inside (Q between idx 6 and 7)
-        (15, y + 4),  # inside
-    ]
+def _run_brush(
+    svc: MaskService,
+    samples: list[tuple[int, int]],
+    modifiers: tuple[str, ...] = (),
+) -> str | None:
+    """Drive the service through a full brush stroke: begin → samples → end."""
+    svc.set_active_tool("brush")
+    target = svc.begin_brush_stroke(samples[0], modifiers=modifiers)
+    if target is None:
+        return None
+    for p in samples[1:]:
+        svc.add_brush_sample(p)
+    return svc.end_brush_stroke()
 
 
-def test_edit_region_stroke_add_extends_region(tmp_path):
+def test_begin_brush_stroke_on_background_is_noop(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
-    # Region 1 at (10,10)-(20,20) — 11x11 = 121 px.
     _draw_lasso(svc, _square(10, 10, 10))
-    before_area = int(svc.state.region_masks[1].sum())
+    history_before = len(svc.history)
 
-    samples = _add_stroke_out_to_out(15, 14)
-    result = svc.edit_region_stroke(1, samples)
+    target = svc.begin_brush_stroke((40, 40))  # background
+    assert target is None
+    assert svc.state.active_brush_stroke is None
+    assert len(svc.history) == history_before
 
+
+def test_begin_brush_stroke_locks_target_and_selects_it(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))
+    svc.clear_selection()
+
+    target = svc.begin_brush_stroke((15, 15))
+    assert target == 1
+    assert svc.state.selected_region_id == 1
+    assert svc.state.active_brush_stroke is not None
+    assert svc.state.active_brush_stroke.mode == "add"
+
+
+def test_begin_brush_stroke_ctrl_modifier_subtract(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))
+
+    svc.begin_brush_stroke((15, 15), modifiers=("ctrl",))
+    assert svc.state.active_brush_stroke.mode == "subtract"
+
+
+def test_begin_brush_stroke_ctrl_wins_over_shift(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))
+    svc.begin_brush_stroke((15, 15), modifiers=("shift", "ctrl"))
+    assert svc.state.active_brush_stroke.mode == "subtract"
+
+
+def test_brush_add_extends_region(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))  # region 1, 121 px
+    before = int(svc.state.region_masks[1].sum())
+    svc.set_brush_radius(3)
+
+    # Press inside, drag out past the right edge — paint adds a lobe.
+    result = _run_brush(svc, [(15, 15), (20, 15), (24, 15)])
     assert result == "added"
-    # Region 1's own mask grew.
-    assert int(svc.state.region_masks[1].sum()) > before_area
-    # Vertex list updated (not the original 4 square corners).
-    assert svc.state.regions[1]["vertices"] != [
-        [10, 10],
-        [20, 10],
-        [20, 20],
-        [10, 20],
-    ]
-    # History got one edit entry (+1 to the initial lasso).
+    assert int(svc.state.region_masks[1].sum()) > before
+    # History: original lasso + one brush command.
     assert len(svc.history) == 2
 
 
-def test_edit_region_stroke_subtract_cuts_a_bite(tmp_path):
+def test_brush_subtract_cuts_a_bite(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
-    _draw_lasso(svc, _square(10, 10, 10))  # 121 px
-    before_area = int(svc.state.region_masks[1].sum())
+    _draw_lasso(svc, _square(10, 10, 10))  # region 1, 121 px
+    before = int(svc.state.region_masks[1].sum())
+    svc.set_brush_radius(2)
 
-    # Stroke starts outside, crosses in, loops inside, crosses back out.
-    samples = [
-        (5, 15),  # outside (left of region)
-        (12, 15),  # inside
-        (15, 15),
-        (15, 18),
-        (18, 18),
-        (18, 15),
-        (25, 15),  # outside (right of region)
-    ]
-    result = svc.edit_region_stroke(1, samples)
-
+    # Press inside with Ctrl → subtract; drag along the bottom edge.
+    result = _run_brush(svc, [(13, 18), (16, 18), (18, 18)], modifiers=("ctrl",))
     assert result == "subtracted"
-    after_area = int(svc.state.region_masks[1].sum())
-    assert after_area < before_area
-    assert after_area > 0  # not fully erased
+    after = int(svc.state.region_masks[1].sum())
+    assert after < before
+    assert after > 0  # not fully erased
 
 
-def test_edit_region_stroke_no_second_crossing_discards(tmp_path):
+def test_brush_subtract_emptying_routes_to_delete(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    # Small 3x3 region at (10,10)-(12,12). A radius-3 disc centered inside
+    # paints over the entire region.
+    _draw_lasso(svc, _square(10, 10, 2))
+    assert 1 in svc.state.regions
+    id_before = svc.state.next_label_id
+    svc.set_brush_radius(5)
+
+    result = _run_brush(svc, [(11, 11)], modifiers=("ctrl",))
+    assert result == "deleted"
+    assert 1 not in svc.state.regions
+    assert 1 not in svc.state.region_masks
+    # ID 1 stays reserved — monotonic IDs (knowledge/014).
+    assert svc.state.next_label_id == id_before
+
+
+def test_brush_no_intersection_is_discarded(tmp_path):
+    """An add stroke that paints only background outside the target region's
+    influence (no intersection with the region after the OR) is a no-op.
+
+    With add mode, ``new_mask = target | S`` — if ``S`` doesn't change the
+    target's pixels at all (because ``S`` is empty), the result equals the
+    target and no command is committed.
+    """
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))
-    hist_before = len(svc.history)
+    history_before = len(svc.history)
 
-    # Stroke enters the region but never exits — only one crossing.
-    samples = [(5, 15), (12, 15), (14, 15), (16, 15)]
-    result = svc.edit_region_stroke(1, samples)
-
+    # Begin stroke on the region (so we have a valid target), then never add
+    # any other samples. The stamped disc covers a few pixels of the region
+    # itself, which means new_mask == target after OR (no growth) — discarded.
+    svc.set_brush_radius(1)
+    svc.set_active_tool("brush")
+    svc.begin_brush_stroke((15, 15))
+    result = svc.end_brush_stroke()
     assert result is None
-    assert len(svc.history) == hist_before
-    assert svc.state.region_masks[1].sum() == 121
+    assert len(svc.history) == history_before
 
 
-def test_edit_region_stroke_too_few_samples_discards(tmp_path):
+def test_cancel_brush_stroke_discards_no_history(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))
+    history_before = len(svc.history)
 
-    result = svc.edit_region_stroke(1, [(12, 12), (13, 13)])
-    assert result is None
-    assert len(svc.history) == 1  # only the original lasso
-
-
-def test_edit_region_stroke_unknown_target_raises(tmp_path):
-    svc = MaskService()
-    svc.load_image(_write_image(tmp_path))
-    with pytest.raises(KeyError):
-        svc.edit_region_stroke(99, [(1, 1), (5, 5), (10, 10), (1, 1)])
+    svc.set_active_tool("brush")
+    svc.begin_brush_stroke((15, 15))
+    svc.add_brush_sample((20, 15))
+    svc.cancel_brush_stroke()
+    assert svc.state.active_brush_stroke is None
+    assert len(svc.history) == history_before
 
 
-def test_edit_region_stroke_undo_restores_region_mask_pixel_identically(tmp_path):
+def test_brush_add_undo_restores_state_pixel_identically(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))
     before_mask = svc.state.region_masks[1].copy()
     before_verts = list(svc.state.regions[1]["vertices"])
     before_map = svc.state.label_map.copy()
+    svc.set_brush_radius(3)
 
-    samples = [
-        (5, 15),
-        (12, 15),
-        (15, 15),
-        (15, 18),
-        (18, 18),
-        (18, 15),
-        (25, 15),
-    ]
-    assert svc.edit_region_stroke(1, samples) == "subtracted"
+    assert _run_brush(svc, [(15, 15), (22, 15)]) == "added"
     assert svc.undo() is True
-
     assert np.array_equal(svc.state.region_masks[1], before_mask)
     assert svc.state.regions[1]["vertices"] == before_verts
     assert np.array_equal(svc.state.label_map, before_map)
 
 
-def test_edit_region_stroke_subtract_emptying_routes_to_delete(tmp_path):
+def test_brush_target_locked_at_press_down(tmp_path):
+    """Dragging across other regions does not re-target — the press-down
+    region owns the entire stroke (knowledge/026)."""
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
-    # Small 3x3 region at (10,10)-(12,12) — the subtract stroke's inside-run
-    # traces a rectangle around all region corners, so the rasterized S fully
-    # covers the region and new_mask ends up empty.
-    _draw_lasso(svc, _square(10, 10, 2))
-    assert 1 in svc.state.regions
-    id_before = svc.state.next_label_id
+    _draw_lasso(svc, _square(5, 10, 10))  # region 1: x=5..15
+    _draw_lasso(svc, _square(25, 10, 10))  # region 2: x=25..35
+    r2_before = svc.state.region_masks[2].copy()
+    svc.set_brush_radius(2)
 
-    # Outside -> four inside corner samples -> outside. samples[P+1:Q+1] is
-    # the four inside corners, which rasterize to the full 3x3 square mask.
-    samples = [
-        (5, 5),  # outside
-        (10, 10),  # inside top-left — P between 0 and 1
-        (12, 10),  # inside top-right
-        (12, 12),  # inside bottom-right
-        (10, 12),  # inside bottom-left
-        (20, 20),  # outside — Q between 4 and 5
-    ]
-    result = svc.edit_region_stroke(1, samples)
-
-    assert result == "deleted"
-    assert 1 not in svc.state.regions
-    assert 1 not in svc.state.region_masks
-    # next_label_id is NOT decremented — ID 1 stays reserved (knowledge/014).
-    assert svc.state.next_label_id == id_before
-
-
-def test_edit_region_stroke_add_allows_overlap_with_neighbor(tmp_path):
-    """An add stroke extending region 1 into region 2 does NOT clip. Both
-    region_masks claim overlap pixels; display cache shows highest id."""
-    svc = MaskService()
-    svc.load_image(_write_image(tmp_path))
-    _draw_lasso(svc, [(5, 10), (15, 10), (15, 20), (5, 20)])  # region 1
-    _draw_lasso(svc, [(20, 10), (30, 10), (30, 20), (20, 20)])  # region 2
-    r2_mask_before = svc.state.region_masks[2].copy()
-
-    # Start inside region 1, exit to the right into region 2's pixels, loop
-    # through several outside samples, re-enter region 1.
-    samples = [
-        (10, 15),  # inside region 1
-        (14, 15),  # inside
-        (22, 15),  # outside r1 (but inside r2) — P between 1 and 2
-        (25, 15),
-        (25, 12),
-        (22, 12),
-        (18, 12),
-        (16, 12),  # still outside r1 (r1 ends at x=15)
-        (14, 12),  # back inside r1 — Q between 7 and 8
-        (10, 12),
-    ]
-    result = svc.edit_region_stroke(1, samples)
+    # Press inside region 1, drag through the gap into region 2's territory.
+    result = _run_brush(svc, [(10, 15), (20, 15), (28, 15)])
     assert result == "added"
-
-    # Region 2's own mask is untouched.
-    assert np.array_equal(svc.state.region_masks[2], r2_mask_before)
-    # Region 1 now claims pixels overlapping region 2.
-    assert svc.state.region_masks[1][14, 22]
-    assert svc.state.region_masks[2][14, 22]
-    # Display cache resolves to the higher label on the overlap.
-    assert svc.state.label_map[14, 22] == 2
+    # Region 2's own mask is unchanged — the stroke only edits region 1.
+    assert np.array_equal(svc.state.region_masks[2], r2_before)
+    # Region 1 grew toward region 2.
+    assert svc.state.region_masks[1][15, 20]
 
 
-def test_edit_region_stroke_notifies_observers(tmp_path):
+def test_brush_overlap_with_neighbor_allowed(tmp_path):
+    """Adding into a neighbor's pixels: both region_masks claim overlap;
+    display cache shows highest id (knowledge/025)."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(5, 10, 10))  # region 1
+    _draw_lasso(svc, _square(20, 10, 10))  # region 2
+    r2_before = svc.state.region_masks[2].copy()
+    svc.set_brush_radius(3)
+
+    # Drag from inside region 1 into region 2's body. Add stroke.
+    result = _run_brush(svc, [(10, 15), (16, 15), (22, 15)])
+    assert result == "added"
+    # Region 2 untouched.
+    assert np.array_equal(svc.state.region_masks[2], r2_before)
+    # The shared pixel belongs to both region_masks.
+    assert svc.state.region_masks[1][15, 22]
+    assert svc.state.region_masks[2][15, 22]
+    # Display: higher id wins.
+    assert svc.state.label_map[15, 22] == 2
+
+
+def test_end_brush_stroke_with_no_active_returns_none(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    assert svc.end_brush_stroke() is None
+
+
+def test_brush_notifies_observers(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square(10, 10, 10))
+    svc.set_brush_radius(3)
 
     calls: list[int] = []
     svc.subscribe(lambda: calls.append(1))
-
-    samples = _add_stroke_out_to_out(15, 14)
-    svc.edit_region_stroke(1, samples)
+    _run_brush(svc, [(15, 15), (22, 15)])
     assert sum(calls) >= 1

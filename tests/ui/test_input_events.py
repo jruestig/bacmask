@@ -6,7 +6,9 @@ import pytest
 from bacmask.ui.input.desktop_adapter import (
     DEFAULT_KEYBINDINGS,
     DesktopInputAdapter,
+    button_label,
     keybinding_for,
+    label_for_action,
 )
 from bacmask.ui.input.events import (
     Action,
@@ -53,8 +55,22 @@ def test_keybinding_enter_closes_lasso():
     assert keybinding_for("enter", set()) == "close_lasso"
 
 
-def test_keybinding_escape_cancels_lasso():
-    assert keybinding_for("escape", set()) == "cancel_lasso"
+def test_keybinding_escape_cancels_stroke():
+    assert keybinding_for("escape", set()) == "cancel_stroke"
+
+
+def test_keybinding_l_selects_lasso():
+    assert keybinding_for("l", set()) == "select_lasso"
+
+
+def test_keybinding_b_selects_brush():
+    assert keybinding_for("b", set()) == "select_brush"
+
+
+def test_keybinding_e_alone_unbound():
+    """`e` alone was previously toggle_edit_mode (knowledge/026 supersedes 023);
+    it is now intentionally unbound to keep discoverability honest."""
+    assert keybinding_for("e", set()) is None
 
 
 def test_keybinding_ctrl_z_undo():
@@ -87,6 +103,52 @@ def test_default_keybindings_dict_shape():
         assert isinstance(key, str)
         assert isinstance(mods, frozenset)
         assert isinstance(action, str)
+
+
+# ---- label_for_action / button_label (knowledge/027) ----
+
+
+def test_label_for_action_save_is_ctrl_s():
+    assert label_for_action("save_bundle") == "Ctrl+S"
+
+
+def test_label_for_action_undo_is_ctrl_z():
+    assert label_for_action("undo") == "Ctrl+Z"
+
+
+def test_label_for_action_redo_prefers_ctrl_y_over_ctrl_shift_z():
+    """Redo has two bindings (Ctrl+Y and Ctrl+Shift+Z). The canonical binding
+    is the first one listed in DEFAULT_KEYBINDINGS — Ctrl+Y — because it's
+    shorter and more common. Reordering the dict controls this."""
+    assert label_for_action("redo") == "Ctrl+Y"
+
+
+def test_label_for_action_delete_prefers_del_over_backspace():
+    assert label_for_action("delete_region") == "Del"
+
+
+def test_label_for_action_escape_renders_as_esc():
+    assert label_for_action("cancel_stroke") == "Esc"
+
+
+def test_label_for_action_enter_renders_as_enter():
+    assert label_for_action("close_lasso") == "Enter"
+
+
+def test_label_for_action_bare_letter_uppercased():
+    assert label_for_action("select_brush") == "B"
+
+
+def test_label_for_action_unknown_returns_none():
+    assert label_for_action("not_a_real_action") is None
+
+
+def test_button_label_composes_base_with_shortcut():
+    assert button_label("save_bundle", "Save") == "Save (Ctrl+S)"
+
+
+def test_button_label_no_shortcut_returns_base_unchanged():
+    assert button_label("unbound_action", "Whatever") == "Whatever"
 
 
 # ---- DesktopInputAdapter emissions ----

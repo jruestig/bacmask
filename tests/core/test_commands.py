@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 
 from bacmask.core.commands import (
+    BrushStrokeCommand,
     DeleteRegionCommand,
     LassoCloseCommand,
-    RegionEditCommand,
     VertexEditCommand,
 )
 from bacmask.core.state import SessionState
@@ -234,7 +234,7 @@ def test_vertex_edit_shape_change_no_other_region():
     assert int(xs.max()) >= 17
 
 
-# ---- RegionEditCommand -------------------------------------------------------
+# ---- BrushStrokeCommand -------------------------------------------------------
 
 
 def _make_mask(shape: tuple[int, int], verts: np.ndarray) -> np.ndarray:
@@ -243,14 +243,14 @@ def _make_mask(shape: tuple[int, int], verts: np.ndarray) -> np.ndarray:
     return masking.rasterize_polygon_mask(verts, shape)
 
 
-def test_region_edit_command_swaps_vertices_and_mask():
+def test_brush_stroke_command_swaps_vertices_and_mask():
     s = _state()
     LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)  # region 1
 
     new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
     new_mask = _make_mask(s.label_map.shape, new_verts)
 
-    cmd = RegionEditCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
     cmd.apply(s)
 
     assert s.regions[1]["vertices"] == new_verts.tolist()
@@ -262,7 +262,7 @@ def test_region_edit_command_swaps_vertices_and_mask():
     assert s.dirty is True
 
 
-def test_region_edit_command_undo_restores_state():
+def test_brush_stroke_command_undo_restores_state():
     s = _state()
     LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
     before_map = s.label_map.copy()
@@ -271,7 +271,7 @@ def test_region_edit_command_undo_restores_state():
 
     new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
     new_mask = _make_mask(s.label_map.shape, new_verts)
-    cmd = RegionEditCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
     cmd.apply(s)
     cmd.undo(s)
 
@@ -280,13 +280,13 @@ def test_region_edit_command_undo_restores_state():
     assert s.regions[1]["vertices"] == before_verts
 
 
-def test_region_edit_command_apply_undo_apply_is_byte_identical():
+def test_brush_stroke_command_apply_undo_apply_is_byte_identical():
     s = _state()
     LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
 
     new_verts = np.array([[10, 10], [25, 10], [25, 20], [10, 20]], dtype=np.int32)
     new_mask = _make_mask(s.label_map.shape, new_verts)
-    cmd = RegionEditCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
+    cmd = BrushStrokeCommand(label_id=1, new_vertices=new_verts, new_region_mask=new_mask)
     cmd.apply(s)
     after_map = s.label_map.copy()
     after_mask = s.region_masks[1].copy()
@@ -297,25 +297,25 @@ def test_region_edit_command_apply_undo_apply_is_byte_identical():
     assert np.array_equal(s.region_masks[1], after_mask)
 
 
-def test_region_edit_command_rejects_unknown_label():
+def test_brush_stroke_command_rejects_unknown_label():
     s = _state()
     new_verts = np.array([[1, 1], [5, 1], [5, 5]], dtype=np.int32)
     new_mask = _make_mask(s.label_map.shape, new_verts)
     with pytest.raises(ValueError):
-        RegionEditCommand(
+        BrushStrokeCommand(
             label_id=99,
             new_vertices=new_verts,
             new_region_mask=new_mask,
         ).apply(s)
 
 
-def test_region_edit_command_rejects_shape_mismatch():
+def test_brush_stroke_command_rejects_shape_mismatch():
     s = _state()
     LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
     new_verts = np.array([[10, 10], [15, 10], [15, 15]], dtype=np.int32)
     wrong_shape = np.zeros((5, 5), dtype=bool)
     with pytest.raises(ValueError):
-        RegionEditCommand(
+        BrushStrokeCommand(
             label_id=1,
             new_vertices=new_verts,
             new_region_mask=wrong_shape,

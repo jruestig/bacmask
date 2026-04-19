@@ -85,67 +85,70 @@ def polygon_area(vertices: np.ndarray) -> float:
     return float(cv2.contourArea(verts))
 
 
-# ---- region-edit stroke helpers (knowledge/023) ------------------------------
+# ---- brush stamp helpers (knowledge/026) -------------------------------------
 
 
-def find_boundary_crossings(
-    samples: np.ndarray,
-    target_mask: np.ndarray,
-) -> tuple[int | None, int | None]:
-    """Return ``(P, Q)`` — the indices of the first two boundary crossings.
-
-    A crossing between samples ``i`` and ``i+1`` is defined as
-    ``target_mask[samples[i]] != target_mask[samples[i+1]]`` (in-region vs
-    outside). ``P`` is the first such index, ``Q`` the second. Either may be
-    ``None`` when not found. Samples outside the image bounds count as
-    outside-region.
-
-    See knowledge/023, step 2.
-    """
-    pts = np.asarray(samples, dtype=np.int64).reshape(-1, 2)
-    if len(pts) < 2:
-        return None, None
-    h, w = target_mask.shape
-    xs = pts[:, 0]
-    ys = pts[:, 1]
-    in_bounds = (xs >= 0) & (xs < w) & (ys >= 0) & (ys < h)
-    inside = np.zeros(len(pts), dtype=bool)
-    if in_bounds.any():
-        inside[in_bounds] = target_mask[ys[in_bounds], xs[in_bounds]]
-
-    p: int | None = None
-    q: int | None = None
-    for i in range(len(pts) - 1):
-        if inside[i] != inside[i + 1]:
-            if p is None:
-                p = i
-            else:
-                q = i
-                break
-    return p, q
-
-
-def rasterize_stroke_polygon(
-    samples: np.ndarray,
-    image_shape: tuple[int, int],
+def stamp_brush_disc(
+    mask: np.ndarray,
+    center: tuple[int, int],
+    radius: int,
 ) -> np.ndarray:
-    """Close an open polyline by a straight segment and rasterize to a bool mask.
+    """Paint a filled disc of ``radius`` centered at ``center`` into ``mask`` (in place).
 
-    The stroke ``samples`` (list of ``(x, y)`` points) is interpreted as an
-    open polyline; a line from the last point to the first closes it into a
-    polygon, which is then filled using ``cv2.fillPoly`` (even-odd rule) into
-    an ``(H, W)`` bool mask.
-
-    Returns an all-False mask if fewer than 3 samples are supplied.
-    See knowledge/023, step 3.
+    Operates in image space. Out-of-bounds extents are clipped silently.
+    Returns the same mask for chaining.
     """
-    h, w = image_shape
-    pts = np.asarray(samples, dtype=np.int32).reshape(-1, 2)
-    mask = np.zeros((h, w), dtype=np.uint8)
-    if len(pts) < 3:
-        return mask.astype(bool)
-    cv2.fillPoly(mask, [pts.reshape(-1, 1, 2)], color=1)
-    return mask.astype(bool)
+    if mask.dtype != bool:
+        raise TypeError(f"mask must be bool, got {mask.dtype}")
+    if radius < 1:
+        return mask
+    cx, cy = int(center[0]), int(center[1])
+    h, w = mask.shape
+    # Bounding box of the disc, clipped to image.
+    x0 = max(0, cx - radius)
+    x1 = min(w, cx + radius + 1)
+    y0 = max(0, cy - radius)
+    y1 = min(h, cy + radius + 1)
+    if x0 >= x1 or y0 >= y1:
+        return mask
+    ys, xs = np.ogrid[y0:y1, x0:x1]
+    disc = (xs - cx) ** 2 + (ys - cy) ** 2 <= radius * radius
+    mask[y0:y1, x0:x1] |= disc
+    return mask
+
+
+def stamp_brush_segment(
+    mask: np.ndarray,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    radius: int,
+) -> np.ndarray:
+    """Sweep a disc of ``radius`` along the segment ``start → end`` into ``mask``.
+
+    Uses ``cv2.line`` with ``thickness = 2 * radius + 1`` so successive
+    pointer samples leave no gaps at fast cursor speeds (knowledge/026 step 3).
+    Endpoints are also stamped as discs to round the line caps.
+    """
+    if mask.dtype != bool:
+        raise TypeError(f"mask must be bool, got {mask.dtype}")
+    if radius < 1:
+        return mask
+    u8 = mask.view(np.uint8)
+    x0, y0 = int(start[0]), int(start[1])
+    x1, y1 = int(end[0]), int(end[1])
+    cv2.line(
+        u8,
+        (x0, y0),
+        (x1, y1),
+        color=1,
+        thickness=2 * radius + 1,
+        lineType=cv2.LINE_8,
+    )
+    # Round caps via discs at both endpoints (cv2.line already does butt caps
+    # on uint8 of width thickness — the disc adds the rounded ends).
+    stamp_brush_disc(mask, (x0, y0), radius)
+    stamp_brush_disc(mask, (x1, y1), radius)
+    return mask
 
 
 def largest_connected_component(mask: np.ndarray) -> np.ndarray:

@@ -1,4 +1,4 @@
-"""Reversible mask-mutation commands. See knowledge/003 & 014."""
+"""Reversible mask-mutation commands. See knowledge/003, 014, 026."""
 
 from __future__ import annotations
 
@@ -13,13 +13,26 @@ from bacmask.core import masking
 @dataclass
 class LassoCloseCommand:
     vertices: np.ndarray
+    # Optional pre-rasterized region mask. When provided, apply uses it instead
+    # of re-rasterizing ``vertices`` — this is the path the service takes after
+    # running the largest-CC/contour cleanup, where the mask is the source of
+    # truth and the vertex list is derived from it. Re-rasterizing would shift
+    # the mask by up to a pixel on each edge.
+    region_mask: np.ndarray | None = None
     assigned_label_id: int = field(init=False, default=0)
     _prev_next_id: int = field(init=False, default=0)
 
     def apply(self, state: Any) -> None:
         self._prev_next_id = state.next_label_id
         self.assigned_label_id = state.next_label_id
-        region_mask = masking.rasterize_polygon_mask(self.vertices, state.label_map.shape)
+        if self.region_mask is not None:
+            region_mask = np.asarray(self.region_mask, dtype=bool)
+            if region_mask.shape != state.label_map.shape:
+                raise ValueError(
+                    f"region_mask shape {region_mask.shape} != label_map {state.label_map.shape}"
+                )
+        else:
+            region_mask = masking.rasterize_polygon_mask(self.vertices, state.label_map.shape)
         state.region_masks[self.assigned_label_id] = region_mask
         # Paint into the display cache — this region is the newest, so it wins
         # on any overlapping pixels per knowledge/025.
@@ -73,8 +86,8 @@ class VertexEditCommand:
 
     Overlaps with other regions are allowed (knowledge/025) — we no longer clip
     at neighbors. This command is kept for direct polygon replacement; the
-    lasso-based add/subtract edit flow uses ``RegionEditCommand``
-    (knowledge/023).
+    brush-based add/subtract edit flow uses :class:`BrushStrokeCommand`
+    (knowledge/026).
     """
 
     label_id: int
@@ -119,14 +132,14 @@ class VertexEditCommand:
 
 
 @dataclass
-class RegionEditCommand:
-    """Commit the result of an add/subtract edit stroke (knowledge/023).
+class BrushStrokeCommand:
+    """Commit the result of an add/subtract brush stroke (knowledge/026).
 
     The service computes the post-stroke ``new_vertices`` + ``new_region_mask``
-    (boundary-crossing truncation, rasterization, connected-component filter,
-    contour re-derivation) and hands them here. This command is a simple state
-    swap — it stores the pre-edit vertex list and region_mask so undo can
-    restore them exactly, then repaints the display label_map.
+    (disc stamp accumulation, connected-component filter, contour
+    re-derivation) and hands them here. This command is a simple state swap —
+    it stores the pre-edit vertex list and region_mask so undo can restore
+    them exactly, then repaints the display label_map.
 
     Overlap with other regions is allowed (knowledge/025); this command does
     not touch any region other than ``label_id``.
@@ -151,12 +164,15 @@ class RegionEditCommand:
                 f"new_region_mask shape {new_mask.shape} != label_map {state.label_map.shape}"
             )
 
-        # Snapshot for undo (before any mutation).
+        # Snapshot for undo (before any mutation). The service hands us a
+        # freshly-built ``new_region_mask`` and never touches it again, so we
+        # can take ownership directly — no defensive ``.copy()`` is needed,
+        # which saves an HxW bool copy per brush commit on large images.
         self._old_vertices = [list(v) for v in state.regions[self.label_id]["vertices"]]
         old_mask = state.region_masks.get(self.label_id)
         self._old_region_mask = old_mask.copy() if old_mask is not None else None
 
-        state.region_masks[self.label_id] = new_mask.copy()
+        state.region_masks[self.label_id] = new_mask
         state.regions[self.label_id]["vertices"] = new_verts.tolist()
         masking.repaint_label_map(state.label_map, state.region_masks)
         state.dirty = True

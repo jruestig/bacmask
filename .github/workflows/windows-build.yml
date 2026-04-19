@@ -1,0 +1,62 @@
+name: windows-build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime + build deps
+        run: |
+          uv sync --no-dev
+          uv pip install pyinstaller "kivy_deps.sdl2" "kivy_deps.glew"
+
+      - name: Build onefolder dist with PyInstaller
+        run: uv run pyinstaller packaging\bacmask.spec --noconfirm
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer with Inno Setup
+        run: iscc packaging\installer.iss
+
+      - name: Read version from pyproject.toml
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path pyproject.toml -Pattern '^version\s*=\s*"(.+)"').Matches.Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bacmask-setup-${{ steps.version.outputs.version }}
+          path: dist/bacmask-setup-${{ steps.version.outputs.version }}.exe
+          if-no-files-found: error
+
+      - name: Upload onefolder artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bacmask-onefolder-${{ steps.version.outputs.version }}
+          path: dist/bacmask/
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/bacmask-setup-${{ steps.version.outputs.version }}.exe
+          fail_on_unmatched_files: true

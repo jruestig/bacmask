@@ -4,9 +4,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
+
+from bacmask.config import defaults
+
+Tool = Literal["lasso", "brush"]
+
+
+@dataclass
+class BrushStroke:
+    """In-progress brush stroke buffer. See knowledge/026."""
+
+    target_id: int
+    mode: Literal["add", "subtract"]
+    # Bool mask of accumulated brush footprint in image space.
+    mask: np.ndarray
+    # Last image-space sample for line-sweep continuity between PointerMoves.
+    last_pos: tuple[int, int]
+    # Image-space bbox of the painted footprint (y0, y1, x0, x1) — half-open
+    # in y/x. Maintained incrementally as samples are stamped so the commit
+    # path can skip a full ``np.where(mask)`` pass on large images.
+    bbox: tuple[int, int, int, int] | None = None
 
 
 @dataclass
@@ -31,7 +51,12 @@ class SessionState:
     # per-move O(N) reallocation a fresh ndarray would cost on every sample.
     active_lasso: np.ndarray | list[tuple[int, int]] | None = None
     selected_region_id: int | None = None
-    edit_mode: bool = False
+    # Active editing tool. Picking the tool is the mode (knowledge/013, 026).
+    active_tool: Tool = "lasso"
+    # Image-space radius for the brush stamp. Session-local (knowledge/026).
+    brush_radius_px: int = defaults.BRUSH_RADIUS_DEFAULT_PX
+    # Per-stroke buffer. None when no brush stroke is in flight.
+    active_brush_stroke: BrushStroke | None = None
     dirty: bool = False
     # Monotonic counter bumped whenever `regions` or `region_masks` change.
     # Canvas watches this to gate the (expensive) overlay-texture rebuild so
@@ -50,6 +75,7 @@ class SessionState:
         self.region_masks = {}
         self.next_label_id = 1
         self.active_lasso = None
+        self.active_brush_stroke = None
         self.selected_region_id = None
         self.dirty = False
         self.regions_version += 1

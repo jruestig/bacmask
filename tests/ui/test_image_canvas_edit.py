@@ -1,4 +1,4 @@
-"""Canvas edit-mode interaction: targeting, stroke dispatch, double-tap retarget."""
+"""Canvas brush-tool interaction: targeting, stroke dispatch, modifier resolution."""
 
 from __future__ import annotations
 
@@ -39,6 +39,10 @@ def _canvas(svc: MaskService, widget_w: float = 400.0, widget_h: float = 400.0) 
     c._image_texture = None
     c._overlay_texture = None
     c._last_image = svc.state.image
+    c._last_regions_version = -1
+    c._ghost_texture = None
+    c._ghost_signature = None
+    c._last_pointer_pos = None
     c._view_scale = 1.0
     c._view_offset = (0.0, 0.0)
     c.x = 0.0
@@ -69,135 +73,12 @@ def _widget_pos_for_image_pixel(
     return canvas.x + wx, canvas.y + canvas.height - wy
 
 
-# ---- first-tap targeting ---------------------------------------------------
+# ---- lasso tool: tap behavior ----------------------------------------------
 
 
-def test_edit_mode_first_tap_on_region_sets_target_no_stroke():
+def test_lasso_tool_tap_on_region_selects():
     svc = _service_with_region()
-    svc.set_edit_mode(True)
-    assert svc.state.selected_region_id is None
-
-    c = _canvas(svc)
-    window_pos = _widget_pos_for_image_pixel(c, (15.0, 15.0), (50, 50))
-    c._on_input(PointerDown(pos=window_pos, is_double=False))
-
-    assert svc.state.selected_region_id == 1
-    # No lasso buffer started.
-    assert svc.state.active_lasso is None
-
-
-def test_edit_mode_first_tap_on_background_is_noop():
-    svc = _service_with_region()
-    svc.set_edit_mode(True)
-    c = _canvas(svc)
-    window_pos = _widget_pos_for_image_pixel(c, (40.0, 40.0), (50, 50))  # outside region
-    c._on_input(PointerDown(pos=window_pos, is_double=False))
-
-    assert svc.state.selected_region_id is None
-    assert svc.state.active_lasso is None
-
-
-# ---- double-tap retargeting ------------------------------------------------
-
-
-def test_edit_mode_double_tap_on_background_clears_target():
-    svc = _service_with_region()
-    svc.set_edit_mode(True)
-    svc.select_region(1)
-    c = _canvas(svc)
-
-    window_pos = _widget_pos_for_image_pixel(c, (40.0, 40.0), (50, 50))
-    c._on_input(PointerDown(pos=window_pos, is_double=True))
-
-    assert svc.state.selected_region_id is None
-
-
-def test_edit_mode_double_tap_on_region_retargets():
-    svc = _service_with_region()
-    # Add a second region.
-    verts2 = np.array([[30, 30], [40, 30], [40, 40], [30, 40]], dtype=np.int32)
-    region_mask2 = masking.rasterize_polygon_mask(verts2, svc.state.label_map.shape)
-    svc.state.region_masks[2] = region_mask2
-    svc.state.regions[2] = {"name": "region_02", "vertices": verts2.tolist()}
-    svc.state.next_label_id = 3
-    masking.repaint_label_map(svc.state.label_map, svc.state.region_masks)
-
-    svc.set_edit_mode(True)
-    svc.select_region(1)
-    c = _canvas(svc)
-
-    window_pos = _widget_pos_for_image_pixel(c, (35.0, 35.0), (50, 50))
-    c._on_input(PointerDown(pos=window_pos, is_double=True))
-    assert svc.state.selected_region_id == 2
-
-
-# ---- stroke dispatch -------------------------------------------------------
-
-
-def test_edit_mode_press_drag_subtract_stroke_shrinks_region():
-    svc = _service_with_region()
-    svc.set_edit_mode(True)
-    svc.select_region(1)
-    before = int(svc.state.region_masks[1].sum())
-
-    c = _canvas(svc)
-    # Stroke starts outside, walks through the interior (>=3 samples between
-    # the first entry and first exit so the truncated segment can form a
-    # polygon), then exits. Target region is (10..20, 10..20).
-    path = [(5, 15), (12, 12), (14, 17), (17, 17), (18, 12), (25, 15)]
-    c._on_input(PointerDown(pos=_widget_pos_for_image_pixel(c, path[0], (50, 50))))
-    for p in path[1:]:
-        c._on_input(PointerMove(pos=_widget_pos_for_image_pixel(c, p, (50, 50))))
-    c._on_input(PointerUp(pos=_widget_pos_for_image_pixel(c, path[-1], (50, 50))))
-
-    after = int(svc.state.region_masks[1].sum())
-    assert after < before
-    assert svc.state.active_lasso is None
-
-
-def test_edit_mode_press_drag_add_stroke_grows_region():
-    svc = _service_with_region()
-    svc.set_edit_mode(True)
-    svc.select_region(1)
-    before = int(svc.state.region_masks[1].sum())
-
-    c = _canvas(svc)
-    # Start inside the region, loop outside, re-enter. Add mode adds the lobe.
-    path = [(15, 15), (25, 15), (27, 5), (22, 3), (17, 5), (15, 15)]
-    c._on_input(PointerDown(pos=_widget_pos_for_image_pixel(c, path[0], (50, 50))))
-    for p in path[1:]:
-        c._on_input(PointerMove(pos=_widget_pos_for_image_pixel(c, p, (50, 50))))
-    c._on_input(PointerUp(pos=_widget_pos_for_image_pixel(c, path[-1], (50, 50))))
-
-    after = int(svc.state.region_masks[1].sum())
-    assert after > before
-    assert svc.state.active_lasso is None
-
-
-def test_edit_mode_single_click_with_target_does_not_commit_stroke():
-    svc = _service_with_region()
-    svc.set_edit_mode(True)
-    svc.select_region(1)
-    before_mask = svc.state.region_masks[1].copy()
-    before_history = len(svc.history)
-
-    c = _canvas(svc)
-    pos = _widget_pos_for_image_pixel(c, (15.0, 15.0), (50, 50))
-    c._on_input(PointerDown(pos=pos, is_double=False))
-    c._on_input(PointerUp(pos=pos))
-
-    # One-sample stroke → edit_region_stroke returns None; history unchanged.
-    assert len(svc.history) == before_history
-    assert np.array_equal(svc.state.region_masks[1], before_mask)
-    assert svc.state.active_lasso is None
-
-
-# ---- non-edit-mode still works --------------------------------------------
-
-
-def test_non_edit_mode_tap_on_region_still_selects():
-    svc = _service_with_region()
-    assert svc.state.edit_mode is False
+    assert svc.state.active_tool == "lasso"
     c = _canvas(svc)
 
     pos = _widget_pos_for_image_pixel(c, (15.0, 15.0), (50, 50))
@@ -207,7 +88,7 @@ def test_non_edit_mode_tap_on_region_still_selects():
     assert svc.state.active_lasso is None
 
 
-def test_non_edit_mode_tap_on_background_starts_new_lasso():
+def test_lasso_tool_tap_on_background_starts_new_lasso():
     svc = _service_with_region()
     c = _canvas(svc)
 
@@ -215,3 +96,83 @@ def test_non_edit_mode_tap_on_background_starts_new_lasso():
     c._on_input(PointerDown(pos=pos, is_double=False))
 
     assert svc.state.active_lasso is not None
+
+
+# ---- brush tool: targeting -------------------------------------------------
+
+
+def test_brush_press_on_background_is_noop():
+    svc = _service_with_region()
+    svc.set_active_tool("brush")
+    c = _canvas(svc)
+    pos = _widget_pos_for_image_pixel(c, (40.0, 40.0), (50, 50))
+    c._on_input(PointerDown(pos=pos, modifiers=(), is_double=False))
+    assert svc.state.active_brush_stroke is None
+
+
+def test_brush_press_on_region_begins_stroke_and_selects():
+    svc = _service_with_region()
+    svc.set_active_tool("brush")
+    c = _canvas(svc)
+    pos = _widget_pos_for_image_pixel(c, (15.0, 15.0), (50, 50))
+    c._on_input(PointerDown(pos=pos, modifiers=(), is_double=False))
+    assert svc.state.active_brush_stroke is not None
+    assert svc.state.active_brush_stroke.target_id == 1
+    assert svc.state.active_brush_stroke.mode == "add"
+    assert svc.state.selected_region_id == 1
+
+
+def test_brush_press_with_ctrl_subtracts():
+    svc = _service_with_region()
+    svc.set_active_tool("brush")
+    c = _canvas(svc)
+    pos = _widget_pos_for_image_pixel(c, (15.0, 15.0), (50, 50))
+    c._on_input(PointerDown(pos=pos, modifiers=("ctrl",), is_double=False))
+    assert svc.state.active_brush_stroke.mode == "subtract"
+
+
+def test_brush_drag_release_grows_region():
+    svc = _service_with_region()
+    svc.set_active_tool("brush")
+    svc.set_brush_radius(3)
+    before = int(svc.state.region_masks[1].sum())
+
+    c = _canvas(svc)
+    # Press inside the (10..20, 10..20) square; drag out past the right edge.
+    path = [(15, 15), (20, 15), (24, 15)]
+    c._on_input(
+        PointerDown(
+            pos=_widget_pos_for_image_pixel(c, path[0], (50, 50)),
+            modifiers=(),
+            is_double=False,
+        )
+    )
+    for p in path[1:]:
+        c._on_input(PointerMove(pos=_widget_pos_for_image_pixel(c, p, (50, 50))))
+    c._on_input(PointerUp(pos=_widget_pos_for_image_pixel(c, path[-1], (50, 50))))
+
+    assert svc.state.active_brush_stroke is None
+    assert int(svc.state.region_masks[1].sum()) > before
+
+
+def test_brush_ctrl_drag_release_shrinks_region():
+    svc = _service_with_region()
+    svc.set_active_tool("brush")
+    svc.set_brush_radius(2)
+    before = int(svc.state.region_masks[1].sum())
+
+    c = _canvas(svc)
+    path = [(13, 18), (16, 18), (18, 18)]
+    c._on_input(
+        PointerDown(
+            pos=_widget_pos_for_image_pixel(c, path[0], (50, 50)),
+            modifiers=("ctrl",),
+            is_double=False,
+        )
+    )
+    for p in path[1:]:
+        c._on_input(PointerMove(pos=_widget_pos_for_image_pixel(c, p, (50, 50))))
+    c._on_input(PointerUp(pos=_widget_pos_for_image_pixel(c, path[-1], (50, 50))))
+
+    after = int(svc.state.region_masks[1].sum())
+    assert after < before

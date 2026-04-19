@@ -16,6 +16,15 @@ class ResultsTable(BoxLayout):
         kwargs.setdefault("orientation", "vertical")
         super().__init__(**kwargs)
         self.service = service
+        # Gate the (relatively expensive) row rebuild on the same
+        # ``regions_version`` counter the canvas uses for its overlay texture.
+        # Brush-stroke notifies fire many times per second but never bump
+        # ``regions_version`` until commit — without this gate we'd rebuild
+        # every Label on every PointerMove. Selection changes also need a
+        # repaint (background tint), so we track that separately.
+        self._last_regions_version: int = -1
+        self._last_selected: int | None = None
+        self._last_scale: float | None = None
 
         header = BoxLayout(orientation="horizontal", size_hint_y=None, height=24)
         for text in ("ID", "Name", "px", "mm²"):
@@ -29,7 +38,20 @@ class ResultsTable(BoxLayout):
         scroll.add_widget(self.rows_box)
         self.add_widget(scroll)
 
-        service.subscribe(self._refresh)
+        service.subscribe(self._on_state_changed)
+
+    def _on_state_changed(self) -> None:
+        state = self.service.state
+        if (
+            state.regions_version == self._last_regions_version
+            and state.selected_region_id == self._last_selected
+            and state.scale_mm_per_px == self._last_scale
+        ):
+            return
+        self._last_regions_version = state.regions_version
+        self._last_selected = state.selected_region_id
+        self._last_scale = state.scale_mm_per_px
+        self._refresh()
 
     def _refresh(self) -> None:
         self.rows_box.clear_widgets()

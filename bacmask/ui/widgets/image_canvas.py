@@ -1,8 +1,9 @@
-"""Kivy image canvas: image texture + mask overlay + lasso preview.
+"""Kivy image canvas: image texture + mask overlay + lasso/brush preview.
 
 Renders the full-resolution image fit-to-widget (letterboxed), overlays the
-colored label map, and draws the in-progress lasso polyline.
-See knowledge/004 (perf), 014 (lasso), 016 (input).
+colored label map, draws the in-progress lasso polyline or brush stamp ghost,
+and a brush cursor circle when the brush tool is active.
+See knowledge/004 (perf), 014 (lasso), 016 (input), 026 (brush).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import cv2
 import numpy as np
 from kivy.graphics import (
     Color,
+    Ellipse,
     Line,
     Rectangle,
     StencilPop,
@@ -39,6 +41,10 @@ from bacmask.utils import image_utils
 OVERLAY_ALPHA = 0.45
 SELECTED_OUTLINE_COLOR = (0.0, 1.0, 1.0, 1.0)  # cyan
 LASSO_PREVIEW_COLOR = (1.0, 1.0, 0.0, 1.0)  # yellow
+BRUSH_ADD_COLOR = (0.2, 1.0, 0.2)  # green RGB (alpha applied per use)
+BRUSH_SUBTRACT_COLOR = (1.0, 0.2, 0.2)  # red RGB
+BRUSH_GHOST_ALPHA = 0.55
+BRUSH_CURSOR_ALPHA = 0.95
 
 ZOOM_STEP = 1.2
 VIEW_SCALE_MIN = 0.1
@@ -57,7 +63,15 @@ class ImageCanvas(Widget):
         # -1 forces overlay rebuild on the first state notification even when
         # `regions_version` is still 0 (e.g. bundle loaded into a fresh state).
         self._last_regions_version: int = -1
+        # Brush preview path in image-space coords. Source of truth for the
+        # in-progress stroke's visible footprint — drawn as a single Kivy Line
+        # with rounded caps/joints, which is far cheaper than re-blitting a
+        # full-image RGBA texture per PointerMove.
+        self._brush_preview_pts: list[tuple[int, int]] = []
         self._input = DesktopInputAdapter(emit=self._on_input)
+        # Last pointer position seen on this canvas (window-space). Used for
+        # the brush cursor circle while the brush tool is active.
+        self._last_pointer_pos: tuple[float, float] | None = None
 
         # UI-local view transform (not persisted, not in SessionState).
         # view_offset is in display-space (top-down Y) pixels.
@@ -82,8 +96,8 @@ class ImageCanvas(Widget):
             # Force overlay rebuild at the new image dimensions.
             self._last_regions_version = -1
         # Overlay texture only rebuilds when regions actually change. Selection
-        # / edit-mode / calibration notifies skip this (and the per-frame lasso
-        # drag notifies too — they don't touch regions_version).
+        # / tool / calibration notifies skip this (and the per-frame lasso /
+        # brush drag notifies too — they don't touch regions_version).
         if state.regions_version != self._last_regions_version:
             self._rebuild_overlay_texture()
             self._last_regions_version = state.regions_version
@@ -192,6 +206,13 @@ class ImageCanvas(Widget):
                     size=(tw, th),
                 )
 
+            # Brush-stroke ghost preview — drawn as a single Kivy Line with
+            # rounded caps/joints. One draw call per move beats re-blitting an
+            # HxW RGBA texture every PointerMove for large images.
+            stroke = self.service.state.active_brush_stroke
+            if stroke is not None and self._brush_preview_pts:
+                self._draw_brush_preview(stroke.mode, (img_w, img_h))
+
             # Selected region outline (from stored polygon vertices)
             sid = self.service.state.selected_region_id
             if sid is not None and sid in self.service.state.regions:
@@ -208,9 +229,77 @@ class ImageCanvas(Widget):
                 Color(*LASSO_PREVIEW_COLOR)
                 Line(points=pts, width=1.2)
 
+            # Brush cursor circle — render only while the brush is active and
+            # we have a known pointer position on this canvas.
+            if self.service.state.active_tool == "brush" and self._last_pointer_pos is not None:
+                self._draw_brush_cursor((img_w, img_h))
+
             StencilUnUse()
             Rectangle(pos=stencil_pos, size=stencil_size)
             StencilPop()
+
+    def _draw_brush_preview(
+        self,
+        mode: str,
+        image_size: tuple[int, int],
+    ) -> None:
+        """Draw the in-progress brush stroke as a single rounded polyline.
+
+        Coordinates come from ``self._brush_preview_pts`` (image-space). Width
+        is the brush diameter mapped to widget pixels. One Line draw call,
+        regardless of stroke length — orders of magnitude cheaper than rebuilding
+        a full-image RGBA texture per PointerMove.
+        """
+        if not self._brush_preview_pts:
+            return
+        img_w, img_h = image_size
+        s, _ox, _oy, _, _ = image_utils.fit_to_widget((img_w, img_h), (self.width, self.height))
+        radius_widget = self.service.state.brush_radius_px * s * self._view_scale
+        if radius_widget < 0.5:
+            return
+        rgb = BRUSH_ADD_COLOR if mode == "add" else BRUSH_SUBTRACT_COLOR
+        Color(rgb[0], rgb[1], rgb[2], BRUSH_GHOST_ALPHA)
+        if len(self._brush_preview_pts) == 1:
+            ix, iy = self._brush_preview_pts[0]
+            wpts = self._image_points_to_widget([(ix, iy)], image_size)
+            wx, wy = wpts[0], wpts[1]
+            Ellipse(
+                pos=(wx - radius_widget, wy - radius_widget),
+                size=(radius_widget * 2, radius_widget * 2),
+            )
+            return
+        flat = self._image_points_to_widget(self._brush_preview_pts, image_size)
+        # Kivy ``Line.width`` controls the visual half-thickness in pixels; the
+        # rendered stroke is roughly 2*width wide. ``radius_widget`` therefore
+        # produces a polyline whose footprint matches the disc stamp on the
+        # underlying mask (diameter = 2*r).
+        Line(
+            points=flat,
+            width=max(1.0, radius_widget),
+            cap="round",
+            joint="round",
+        )
+
+    def _draw_brush_cursor(self, image_size: tuple[int, int]) -> None:
+        """Draw a circle outline at the pointer matching brush_radius_px (image-space)."""
+        if self._last_pointer_pos is None:
+            return
+        img_w, img_h = image_size
+        s, _ox, _oy, _, _ = image_utils.fit_to_widget((img_w, img_h), (self.width, self.height))
+        radius_px_widget = self.service.state.brush_radius_px * s * self._view_scale
+        if radius_px_widget < 1:
+            return
+        wx, wy = self._last_pointer_pos
+        stroke = self.service.state.active_brush_stroke
+        if stroke is not None:
+            rgb = BRUSH_ADD_COLOR if stroke.mode == "add" else BRUSH_SUBTRACT_COLOR
+        else:
+            rgb = BRUSH_ADD_COLOR
+        Color(rgb[0], rgb[1], rgb[2], BRUSH_CURSOR_ALPHA)
+        Line(
+            circle=(wx, wy, radius_px_widget),
+            width=1.2,
+        )
 
     def _image_points_to_widget(
         self,
@@ -258,20 +347,31 @@ class ImageCanvas(Widget):
             return
         img_h, img_w = img.shape[:2]
         if isinstance(event, PointerDown):
+            self._last_pointer_pos = event.pos
             xy = self._widget_pos_to_image(event.pos, (img_h, img_w))
             if xy is None:
                 return
-            if self.service.state.edit_mode:
-                self._on_edit_pointer_down(xy, event.is_double)
+            tool = self.service.state.active_tool
+            if tool == "brush":
+                self._on_brush_pointer_down(xy, event.modifiers)
             else:
-                self._on_create_pointer_down(xy)
+                self._on_lasso_pointer_down(xy)
         elif isinstance(event, PointerMove):
-            if self.service.state.active_lasso is None:
-                return
+            self._last_pointer_pos = event.pos
             xy = self._widget_pos_to_image(event.pos, (img_h, img_w))
             if xy is None:
+                self._repaint()
                 return
-            self.service.add_lasso_point(xy)
+            if self.service.state.active_brush_stroke is not None:
+                # Append to canvas-local preview (image-space) BEFORE the
+                # service notify so _repaint sees the new segment.
+                self._brush_preview_pts.append(xy)
+                self.service.add_brush_sample(xy)
+            elif self.service.state.active_lasso is not None:
+                self.service.add_lasso_point(xy)
+            else:
+                # Just refresh the cursor circle position.
+                self._repaint()
         elif isinstance(event, PointerUp):
             self._on_pointer_up()
         elif isinstance(event, Zoom):
@@ -281,10 +381,10 @@ class ImageCanvas(Widget):
         elif isinstance(event, Action):
             self._handle_action(event.name)
 
-    # ---- mode-specific pointer handlers ------------------------------------
+    # ---- per-tool pointer handlers -----------------------------------------
 
-    def _on_create_pointer_down(self, xy: tuple[int, int]) -> None:
-        """Non-edit mode: tap on mask selects; tap on bg starts a new-region lasso."""
+    def _on_lasso_pointer_down(self, xy: tuple[int, int]) -> None:
+        """Lasso tool: tap on mask selects; tap on bg starts a new-region lasso."""
         hit = self._region_at(xy)
         if hit is not None:
             self.service.select_region(hit)
@@ -292,45 +392,27 @@ class ImageCanvas(Widget):
         self.service.clear_selection()
         self.service.begin_lasso(xy)
 
-    def _on_edit_pointer_down(self, xy: tuple[int, int], is_double: bool) -> None:
-        """Edit mode: double-tap retargets; single press-drag strokes on the current target.
-
-        Single-tap behavior (per knowledge/023):
-        - No target yet + hit a region → set target, no stroke.
-        - Target set → begin accumulating a stroke (press-drag ahead).
-        - No target yet + tap on bg → no-op.
-        """
-        svc = self.service
-        if is_double:
-            hit = self._region_at(xy)
-            if hit is not None:
-                svc.select_region(hit)
-            else:
-                svc.clear_selection()
+    def _on_brush_pointer_down(
+        self,
+        xy: tuple[int, int],
+        modifiers: tuple[str, ...],
+    ) -> None:
+        """Brush tool: press-down on a region begins a stroke; on bg = no-op."""
+        target = self.service.begin_brush_stroke(xy, modifiers=modifiers)
+        if target is None:
+            # No-op on background. Spec: brush cannot create regions.
+            self._brush_preview_pts = []
             return
-        if svc.state.selected_region_id is None:
-            hit = self._region_at(xy)
-            if hit is not None:
-                svc.select_region(hit)
-            return
-        svc.begin_lasso(xy)
+        self._brush_preview_pts = [xy]
 
     def _on_pointer_up(self) -> None:
         svc = self.service
-        if svc.state.active_lasso is None:
+        if svc.state.active_brush_stroke is not None:
+            svc.end_brush_stroke()
+            self._brush_preview_pts = []
             return
-        if svc.state.edit_mode:
-            target = svc.state.selected_region_id
-            samples = svc.state.active_lasso
-            samples_list = [(int(p[0]), int(p[1])) for p in samples]
-            svc.cancel_lasso()
-            if target is not None and len(samples_list) >= 2:
-                try:
-                    svc.edit_region_stroke(target, samples_list)
-                except KeyError:
-                    pass
-            return
-        svc.close_lasso()
+        if svc.state.active_lasso is not None:
+            svc.close_lasso()
 
     # ---- view transform -----------------------------------------------------
 
@@ -430,8 +512,13 @@ class ImageCanvas(Widget):
         svc = self.service
         if name == "close_lasso":
             svc.close_lasso()
-        elif name == "cancel_lasso":
-            svc.cancel_lasso()
+        elif name == "cancel_stroke":
+            # Whichever stroke is in flight, discard it. No history entry.
+            if svc.state.active_brush_stroke is not None:
+                svc.cancel_brush_stroke()
+                self._brush_preview_pts = []
+            else:
+                svc.cancel_lasso()
         elif name == "undo":
             svc.undo()
         elif name == "redo":
@@ -443,6 +530,10 @@ class ImageCanvas(Widget):
                     svc.delete_region(sid)
                 except KeyError:
                     pass
+        elif name == "select_lasso":
+            svc.set_active_tool("lasso")
+        elif name == "select_brush":
+            svc.set_active_tool("brush")
 
     def _widget_pos_to_image(
         self,

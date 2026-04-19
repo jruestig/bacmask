@@ -70,61 +70,66 @@ def test_polygon_area_zero_for_fewer_than_3_vertices():
     assert masking.polygon_area(verts) == 0.0
 
 
-# ---- find_boundary_crossings -----------------------------------------------
+# ---- brush stamp helpers ---------------------------------------------------
 
 
-def _filled_square_mask(h: int = 30, w: int = 30) -> np.ndarray:
-    """A solid-square target mask for crossing tests: (10..19, 10..19)."""
-    m = np.zeros((h, w), dtype=bool)
-    m[10:20, 10:20] = True
-    return m
+def test_stamp_brush_disc_paints_filled_circle():
+    m = np.zeros((20, 20), dtype=bool)
+    masking.stamp_brush_disc(m, (10, 10), radius=3)
+    # Center painted; far corners untouched.
+    assert m[10, 10]
+    assert m[7, 10]
+    assert m[10, 7]
+    assert not m[0, 0]
+    # Approximate disc area: pi * r^2 ≈ 28; pixelated disc is in that ballpark.
+    assert 25 <= int(m.sum()) <= 50
 
 
-def test_find_boundary_crossings_no_crossing_returns_none():
-    mask = _filled_square_mask()
-    # All samples outside.
-    pts = np.array([[0, 0], [1, 1], [2, 2]], dtype=np.int32)
-    p, q = masking.find_boundary_crossings(pts, mask)
-    assert p is None and q is None
+def test_stamp_brush_disc_clips_to_image_bounds():
+    m = np.zeros((10, 10), dtype=bool)
+    # Center off the image, disc still partially clips in.
+    masking.stamp_brush_disc(m, (-2, -2), radius=4)
+    # Top-left corner painted; opposite corner untouched.
+    assert m[0, 0]
+    assert not m[9, 9]
 
 
-def test_find_boundary_crossings_one_crossing_returns_p_only():
-    mask = _filled_square_mask()
-    # Outside -> outside -> inside: single crossing between idx 1 and 2.
-    pts = np.array([[0, 0], [5, 15], [15, 15]], dtype=np.int32)
-    p, q = masking.find_boundary_crossings(pts, mask)
-    assert p == 1
-    assert q is None
+def test_stamp_brush_disc_radius_zero_is_noop():
+    m = np.zeros((10, 10), dtype=bool)
+    masking.stamp_brush_disc(m, (5, 5), radius=0)
+    assert not m.any()
 
 
-def test_find_boundary_crossings_two_crossings_returns_both():
-    mask = _filled_square_mask()
-    # Outside -> inside -> outside: crossings at idx 0 and idx 1.
-    pts = np.array([[5, 15], [15, 15], [25, 15]], dtype=np.int32)
-    p, q = masking.find_boundary_crossings(pts, mask)
-    assert p == 0
-    assert q == 1
+def test_stamp_brush_disc_rejects_non_bool_mask():
+    m = np.zeros((10, 10), dtype=np.uint8)
+    with pytest.raises(TypeError):
+        masking.stamp_brush_disc(m, (5, 5), radius=2)
 
 
-def test_find_boundary_crossings_extra_crossings_ignored():
-    mask = _filled_square_mask()
-    # out -> in -> out -> in -> out. Should return P=0, Q=1 only.
-    pts = np.array(
-        [[5, 15], [15, 15], [25, 15], [15, 15], [5, 15]],
-        dtype=np.int32,
-    )
-    p, q = masking.find_boundary_crossings(pts, mask)
-    assert p == 0
-    assert q == 1
+def test_stamp_brush_segment_fills_swept_path():
+    m = np.zeros((20, 40), dtype=bool)
+    masking.stamp_brush_segment(m, (5, 10), (35, 10), radius=2)
+    # Both endpoints + midpoints along the path are painted.
+    assert m[10, 5]
+    assert m[10, 20]
+    assert m[10, 35]
+    # Pixels far above/below the swept band stay clear.
+    assert not m[0, 5]
+    assert not m[19, 35]
 
 
-def test_find_boundary_crossings_out_of_bounds_counts_as_outside():
-    mask = _filled_square_mask()
-    # OOB -> inside -> OOB: crossings at idx 0 and 1.
-    pts = np.array([[-5, -5], [15, 15], [100, 100]], dtype=np.int32)
-    p, q = masking.find_boundary_crossings(pts, mask)
-    assert p == 0
-    assert q == 1
+def test_stamp_brush_segment_no_gaps_at_high_speed():
+    """A long single segment must rasterize as a continuous run — the gap-free
+    invariant the disc-only stamp would violate (knowledge/026 step 3)."""
+    m = np.zeros((30, 100), dtype=bool)
+    masking.stamp_brush_segment(m, (5, 15), (95, 15), radius=1)
+    # Every column between 5 and 95 has at least one painted pixel.
+    cols_with_paint = np.where(m.any(axis=0))[0]
+    assert cols_with_paint.min() <= 5
+    assert cols_with_paint.max() >= 95
+    # Continuous coverage — no missing column in the painted span.
+    span = cols_with_paint.max() - cols_with_paint.min()
+    assert len(cols_with_paint) == span + 1
 
 
 # ---- largest_connected_component -------------------------------------------
@@ -194,25 +199,3 @@ def test_contour_vertices_empty_mask_raises():
     mask = np.zeros((10, 10), dtype=bool)
     with pytest.raises(ValueError):
         masking.contour_vertices(mask)
-
-
-# ---- rasterize_stroke_polygon ----------------------------------------------
-
-
-def test_rasterize_stroke_polygon_closes_open_polyline():
-    # An L-shaped open polyline; closing by last->first gives a triangle.
-    samples = np.array([[5, 5], [15, 5], [15, 15]], dtype=np.int32)
-    mask = masking.rasterize_stroke_polygon(samples, (20, 20))
-    assert mask.dtype == bool
-    # Filled triangle has some True pixels; origin corner is outside.
-    assert mask.any()
-    assert not mask[0, 0]
-
-
-def test_rasterize_stroke_polygon_fewer_than_3_returns_empty():
-    mask = masking.rasterize_stroke_polygon(
-        np.array([[5, 5], [10, 10]], dtype=np.int32),
-        (20, 20),
-    )
-    assert mask.shape == (20, 20)
-    assert not mask.any()
