@@ -95,6 +95,48 @@ def repaint_label_map_bbox(
             sub[region_sub] = label_id
 
 
+def paint_label_map_bbox(
+    label_map: np.ndarray,
+    regions: dict[int, dict],
+    bbox: tuple[int, int, int, int],
+) -> None:
+    """Repaint a sub-rectangle of ``label_map`` from polygon ``regions``.
+
+    Zeroes the half-open ``(y0, y1, x0, x1)`` window of ``label_map`` and
+    paints each polygon whose vertex bbox intersects the window, in ascending
+    ``label_id`` order so the highest id wins on overlap (knowledge/025).
+    ``regions`` is the canonical ``{label_id: {"name": str,
+    "vertices": list[[x, y]]}}`` dict from :class:`SessionState`. The polygon
+    set is the sole source of truth here — no ``region_masks`` are consulted
+    (knowledge/030).
+    """
+    if label_map.dtype != np.uint16:
+        raise TypeError(f"label_map must be uint16, got {label_map.dtype}")
+    y0, y1, x0, x1 = bbox
+    if y0 >= y1 or x0 >= x1:
+        return
+    sub = label_map[y0:y1, x0:x1]
+    sub.fill(0)
+    for label_id in sorted(regions):
+        if not (0 < label_id <= _UINT16_MAX):
+            raise ValueError(f"label_id {label_id} out of uint16 range")
+        verts = np.asarray(regions[label_id]["vertices"], dtype=np.int32).reshape(-1, 2)
+        if len(verts) == 0:
+            continue
+        vx0 = int(verts[:, 0].min())
+        vx1 = int(verts[:, 0].max()) + 1
+        vy0 = int(verts[:, 1].min())
+        vy1 = int(verts[:, 1].max()) + 1
+        if vx1 <= x0 or vx0 >= x1 or vy1 <= y0 or vy0 >= y1:
+            continue
+        # Translate into sub-window coordinates so cv2.fillPoly writes directly
+        # into the sliced view without clipping to the full label_map frame.
+        pts = verts.copy()
+        pts[:, 0] -= x0
+        pts[:, 1] -= y0
+        cv2.fillPoly(sub, [pts.reshape(-1, 1, 2)], color=int(label_id))
+
+
 def vertices_bbox(
     vertices: np.ndarray,
     image_shape: tuple[int, int],

@@ -195,6 +195,49 @@ def test_contour_vertices_rectangle_round_trip():
     assert np.array_equal(rastered, mask)
 
 
+def test_paint_label_map_bbox_empty_regions_zeros_window():
+    lm = np.full((20, 20), 9, dtype=np.uint16)
+    masking.paint_label_map_bbox(lm, {}, (5, 10, 5, 10))
+    # Window zeroed; rest untouched.
+    assert (lm[5:10, 5:10] == 0).all()
+    assert (lm[0:5, :] == 9).all()
+    assert (lm[10:, :] == 9).all()
+    assert (lm[5:10, 0:5] == 9).all()
+    assert (lm[5:10, 10:] == 9).all()
+
+
+def test_paint_label_map_bbox_higher_id_wins_on_overlap():
+    lm = np.zeros((20, 20), dtype=np.uint16)
+    regions = {
+        1: {"name": "a", "vertices": [[2, 2], [10, 2], [10, 10], [2, 10]]},
+        2: {"name": "b", "vertices": [[6, 6], [14, 6], [14, 14], [6, 14]]},
+    }
+    masking.paint_label_map_bbox(lm, regions, (0, 20, 0, 20))
+    # Non-overlap pixel of region 1 (top-left area).
+    assert lm[3, 3] == 1
+    # Non-overlap pixel of region 2 (bottom-right area).
+    assert lm[13, 13] == 2
+    # Overlap pixel — higher id wins (newest-on-top, knowledge/025).
+    assert lm[8, 8] == 2
+
+
+def test_paint_label_map_bbox_skips_polygon_outside_window():
+    lm = np.full((30, 30), 7, dtype=np.uint16)
+    regions = {
+        1: {"name": "outside", "vertices": [[20, 20], [28, 20], [28, 28], [20, 28]]},
+    }
+    masking.paint_label_map_bbox(lm, regions, (0, 10, 0, 10))
+    # Window zeroed; polygon outside window unaffected, outer region untouched.
+    assert (lm[0:10, 0:10] == 0).all()
+    assert (lm[20:28, 20:28] == 7).all()
+
+
+def test_paint_label_map_bbox_rejects_wrong_dtype():
+    lm = np.zeros((10, 10), dtype=np.uint8)
+    with pytest.raises(TypeError):
+        masking.paint_label_map_bbox(lm, {}, (0, 10, 0, 10))
+
+
 def test_contour_vertices_empty_mask_raises():
     mask = np.zeros((10, 10), dtype=bool)
     with pytest.raises(ValueError):

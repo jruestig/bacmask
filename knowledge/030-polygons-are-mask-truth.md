@@ -184,6 +184,24 @@ simpler.
 - Overlap allowed ([025](025-overlapping-regions.md)) — collapses to a
   rendering rule, not a storage rule.
 
+## Pre-refactor baseline (wave 0)
+
+Recorded on 2026-04-19 against commit `950738b`. Fixture:
+`images/20251112093808947.tif` (2746×3584). Numbers from
+`scripts/bench_polygon_refactor.py` — single run, warm fs cache, headless
+(no Kivy window). Wave 3 re-runs the script and fills the remaining columns.
+
+| Step | Baseline (ms) | Post-refactor (ms) | Delta |
+|---|---:|---:|---:|
+| load_image | 311.58 | — | — |
+| lasso_add_x10 | 345.22 | — | — |
+| undo_x5 | 10.81 | — | — |
+| redo_x5 | 45.83 | — | — |
+| brush_add_stroke | 2.36 | — | — |
+| compute_area_rows | 0.04 | — | — |
+| save_bundle | 945.96 | — | — |
+| export_csv | 0.23 | — | — |
+
 ## Related
 
 - [002 — State Management](002-state-management.md) — state shape follows this note.
