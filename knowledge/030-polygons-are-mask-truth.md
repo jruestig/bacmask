@@ -155,8 +155,18 @@ Once the doctrine lands:
   added/removed/changed classification branches — rendering iterates
   polygons, not tracked masks.
 
-Approximate scope: `core/masking.py` ~310 → ~120 lines; `core/commands.py`
-~249 → ~90 lines; `services/mask_service.py` ~674 → ~400 lines.
+Measured scope (wave 2 final):
+
+- `core/masking.py` ~310 → 258 lines (−52)
+- `core/commands.py` ~249 → 193 lines (−56)
+- `services/mask_service.py` ~674 → 649 lines (−25)
+
+The pre-refactor estimates (120 / 90 / 400) were roughly half the actual
+post-refactor totals — the gap is almost entirely surviving docstrings
+and public API preserved for test compatibility, not dead code. The
+*logic* deleted matches the estimates; what stayed is narrative and
+signatures. A later prune-pass on comments would close the gap but adds
+no structural value.
 
 ## Performance
 
@@ -187,20 +197,60 @@ simpler.
 ## Pre-refactor baseline (wave 0)
 
 Recorded on 2026-04-19 against commit `950738b`. Fixture:
-`images/20251112093808947.tif` (2746×3584). Numbers from
+`images/20251112093808947.tif` (2746×3584). Baseline numbers from
 `scripts/bench_polygon_refactor.py` — single run, warm fs cache, headless
-(no Kivy window). Wave 3 re-runs the script and fills the remaining columns.
+(no Kivy window). Post-refactor column filled in wave 3 as the median
+of three consecutive runs against the wave-2 tip.
 
 | Step | Baseline (ms) | Post-refactor (ms) | Delta |
 |---|---:|---:|---:|
-| load_image | 311.58 | — | — |
-| lasso_add_x10 | 345.22 | — | — |
-| undo_x5 | 10.81 | — | — |
-| redo_x5 | 45.83 | — | — |
-| brush_add_stroke | 2.36 | — | — |
-| compute_area_rows | 0.04 | — | — |
-| save_bundle | 945.96 | — | — |
-| export_csv | 0.23 | — | — |
+| load_image | 311.58 | 302.80 | -3% |
+| lasso_add_x10 | 345.22 | 202.60 | 1.7× faster |
+| undo_x5 | 10.81 | 5.90 | 1.8× faster |
+| redo_x5 | 45.83 | 0.71 | 64× faster |
+| brush_add_stroke | 2.36 | 2.74 | +16% |
+| compute_area_rows | 0.04 | 1.37 | 34× slower |
+| save_bundle | 945.96 | 938.33 | -1% |
+| export_csv | 0.23 | 1.66 | 7.2× slower |
+
+Post-refactor column: median of three consecutive runs on the same
+fixture, same commit (wave 2 tip), warm fs cache.
+
+### Notes on the measurements
+
+The real win is memory, not wall clock. A per-region `bool` mask on the
+2746×3584 fixture is `2746*3584 ≈ 9.4 MB`. At N=100 regions that's
+~940 MB of `state.region_masks` + `state.region_areas` we no longer
+allocate. Undo history snapshots drop from O(H·W) per command (the old
+`_old_mask.copy()` path) to O(V) — a vertex list, typically a few hundred
+bytes. On a 4 MP image that's roughly a 100× cut per history entry, and
+history is bounded at 50 entries, so the peak-memory ceiling collapses
+by ~two orders of magnitude.
+
+Wall-clock is largely a wash because the existing architecture already
+amortized the heavy paths — `regions_version`-gated overlay rebuilds,
+bbox-local commit arithmetic, etc. This was a **structural** pass, not
+a speedup pass; the places that did move are side-effects of deleting
+caches.
+
+Three deltas worth calling out:
+
+- **`redo_x5` 64× faster** — the old redo path rebuilt `region_masks` /
+  `region_areas` entries from full-image raster. With polygons canonical
+  redo only re-swaps vertex lists.
+- **`compute_area_rows` 34× slower** and **`export_csv` 7× slower** — both
+  now shoelace every polygon on every call instead of dict-looking-up a
+  cached `region_areas[label_id]`. Absolute cost is still <2 ms on 10
+  regions, i.e. imperceptible for the UI refresh it gates. The tradeoff
+  is worth it: shoelace is the mathematically correct enclosed area (see
+  "Why shoelace (not `mask.sum()`)" above), and the cache it replaced
+  was a known source of drift across undo round-trips. At very large N
+  this path would eventually matter; it's fine for any realistic colony
+  count.
+- **`brush_add_stroke` +16%** — within noise; the commit path still
+  does the transient bbox raster it always did, plus one extra
+  `largest_connected_component` now that the polygon is re-derived from
+  the crop. Sub-ms either way.
 
 ## Related
 
