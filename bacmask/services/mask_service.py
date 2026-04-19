@@ -30,6 +30,9 @@ from bacmask.core.state import BrushStroke, SessionState, Tool
 
 log = logging.getLogger(__name__)
 
+# Cycle order for the toolbar Tab toggle: create → add → subtract → create.
+BRUSH_MODE_ORDER: tuple[str, ...] = ("create", "add", "subtract")
+
 
 def _disc_bbox(cx: int, cy: int, r: int, h: int, w: int) -> tuple[int, int, int, int]:
     """Half-open (y0, y1, x0, x1) bbox of a disc clipped to image bounds."""
@@ -187,13 +190,13 @@ class MaskService:
         self._notify()
 
     def set_brush_default_mode(self, mode: str) -> None:
-        """Set the persistent brush mode (``"add"`` or ``"subtract"``).
+        """Set the persistent brush mode.
 
-        Press-down modifiers still override per knowledge/026: Ctrl forces
-        subtract, Shift forces add. This sets what the brush does when no
-        modifier is held.
+        Values: ``"create"`` (press-drag-release commits a new region built
+        from the painted blob), ``"add"`` / ``"subtract"`` (edit the locked
+        target region). See knowledge/026.
         """
-        if mode not in ("add", "subtract"):
+        if mode not in BRUSH_MODE_ORDER:
             raise ValueError(f"unknown brush mode: {mode!r}")
         if self.state.brush_default_mode == mode:
             return
@@ -201,8 +204,13 @@ class MaskService:
         self._notify()
 
     def toggle_brush_default_mode(self) -> str:
-        """Flip the persistent brush mode and return the new value."""
-        new_mode = "subtract" if self.state.brush_default_mode == "add" else "add"
+        """Cycle to the next brush mode and return the new value.
+
+        Order: ``create → add → subtract → create``. Wraparound.
+        """
+        cur = self.state.brush_default_mode
+        idx = BRUSH_MODE_ORDER.index(cur)
+        new_mode = BRUSH_MODE_ORDER[(idx + 1) % len(BRUSH_MODE_ORDER)]
         self.set_brush_default_mode(new_mode)
         return new_mode
 
@@ -293,40 +301,49 @@ class MaskService:
     def begin_brush_stroke(self, pos: tuple[int, int]) -> int | None:
         """Begin a brush stroke at image-space ``pos``.
 
-        Target resolution:
+        Behavior depends on ``state.brush_default_mode``:
 
-        1. If the press-down pixel hits an existing region, that region
-           becomes the target *and* the new selection. Tap a different region
-           to retarget.
-        2. Otherwise (background or out-of-bounds press-down) the existing
-           ``state.selected_region_id`` is the target. This is what enables
-           subtract-from-outside: you can carve into the region's boundary
-           starting from the empty pixels next to it.
-        3. If neither resolves to an existing region, return ``None`` (no
-           stroke, no history).
+        - **create**: Press-drag-release commits a brand-new region built
+          from the painted blob. No target resolution; ``target_id`` is
+          ``None`` for the duration of the stroke. The press-down pixel can
+          be background or on top of any existing region.
+        - **add** / **subtract** — target resolution:
+          1. Pressed pixel on an existing region → that region targets *and*
+             becomes the selection.
+          2. Pressed pixel on background → fall back to
+             ``state.selected_region_id`` (the lock that enables
+             subtract-from-outside).
+          3. Neither → return ``None`` (no stroke, no history).
 
-        Mode (add vs. subtract) is driven solely by ``state.brush_default_mode``
-        — set via the toolbar Add/Subtract toggles or flipped with Tab. There
-        is no modifier-key override: the toggle is the mode.
+        Mode is set by the brush-panel toggles or flipped with Tab. There is
+        no modifier-key override: the toggle is the mode.
         """
         if self.state.label_map is None:
             return None
         ix, iy = int(pos[0]), int(pos[1])
         h, w = self.state.label_map.shape
 
-        target: int | None = None
-        if 0 <= ix < w and 0 <= iy < h:
-            hit = int(self.state.label_map[iy, ix])
-            if hit != 0 and hit in self.state.regions:
-                target = hit
-        if target is None:
-            sel = self.state.selected_region_id
-            if sel is not None and sel in self.state.regions:
-                target = sel
-        if target is None:
-            return None
-
         mode = self.state.brush_default_mode
+
+        target: int | None
+        if mode == "create":
+            target = None
+            # Clamp the seed pixel into image bounds — used only to seed the
+            # disc stamp position, never read from the label_map.
+            ix = max(0, min(w - 1, ix))
+            iy = max(0, min(h - 1, iy))
+        else:
+            target = None
+            if 0 <= ix < w and 0 <= iy < h:
+                hit = int(self.state.label_map[iy, ix])
+                if hit != 0 and hit in self.state.regions:
+                    target = hit
+            if target is None:
+                sel = self.state.selected_region_id
+                if sel is not None and sel in self.state.regions:
+                    target = sel
+            if target is None:
+                return None
 
         r = self.state.brush_radius_px
         stroke_mask = np.zeros((h, w), dtype=bool)
@@ -338,7 +355,10 @@ class MaskService:
             last_pos=(ix, iy),
             bbox=_disc_bbox(ix, iy, r, h, w),
         )
-        if self.state.selected_region_id != target:
+        # Don't touch the selection in create mode — the stroke isn't bound
+        # to any existing region, and the user may want their previously
+        # selected region to remain highlighted.
+        if mode != "create" and self.state.selected_region_id != target:
             self.state.selected_region_id = target
         self._notify()
         return target
@@ -373,6 +393,7 @@ class MaskService:
         """Commit the in-progress brush stroke.
 
         Returns one of:
+        * ``"created"`` — create stroke committed a new region.
         * ``"added"`` — add stroke committed.
         * ``"subtracted"`` — subtract stroke committed.
         * ``"deleted"`` — subtract emptied the region; routed via DeleteRegionCommand.
@@ -391,19 +412,6 @@ class MaskService:
         # discard paths there must be no leftover ghost.
         self.state.active_brush_stroke = None
 
-        target_id = stroke.target_id
-        if target_id not in self.state.regions:
-            self._notify()
-            return None
-        target_mask = self.state.region_masks.get(target_id)
-        if target_mask is None:
-            self._notify()
-            return None
-
-        s_mask = stroke.mask
-        # Stroke bbox is tracked incrementally during sampling — no full
-        # ``np.where(s_mask)`` pass needed at commit time, which is a sizeable
-        # win on large images.
         if stroke.bbox is None:
             self._notify()
             return None
@@ -412,11 +420,30 @@ class MaskService:
             self._notify()
             return None
 
-        target_crop = target_mask[sy0:sy1, sx0:sx1]
+        s_mask = stroke.mask
         s_crop = s_mask[sy0:sy1, sx0:sx1]
         if not s_crop.any():
             self._notify()
             return None
+
+        # ---- create mode ---------------------------------------------------
+        # Stroke commits a brand-new region built from the painted blob.
+        # Cleanup pipeline matches close_lasso: largest CC + contour
+        # re-derivation, so the stored polygon is a clean simple closed curve.
+        if stroke.mode == "create":
+            return self._commit_brush_create(s_mask, sy0, sy1, sx0, sx1)
+
+        # ---- add / subtract editing path -----------------------------------
+        target_id = stroke.target_id
+        if target_id is None or target_id not in self.state.regions:
+            self._notify()
+            return None
+        target_mask = self.state.region_masks.get(target_id)
+        if target_mask is None:
+            self._notify()
+            return None
+
+        target_crop = target_mask[sy0:sy1, sx0:sx1]
 
         # No-op detection on the crop (cheap):
         #   add      → no painted pixel lay outside the target
@@ -495,6 +522,42 @@ class MaskService:
         self.history.push(edit_cmd, self.state)
         self._notify()
         return "added" if stroke.mode == "add" else "subtracted"
+
+    def _commit_brush_create(
+        self,
+        s_mask: np.ndarray,
+        sy0: int,
+        sy1: int,
+        sx0: int,
+        sx1: int,
+    ) -> str | None:
+        """Commit a create-mode brush stroke as a fresh region.
+
+        Mirrors the close_lasso cleanup: largest connected component within
+        the stroke bbox + ``contour_vertices`` for the canonical polygon. The
+        stored region's mask is the cleaned blob pasted back into a fresh
+        full-image bool mask so it lines up with the rest of the system.
+        """
+        s_crop = s_mask[sy0:sy1, sx0:sx1]
+        filtered_crop = masking.largest_connected_component(s_crop)
+        if not filtered_crop.any():
+            self._notify()
+            return None
+        crop_verts = masking.contour_vertices(filtered_crop)
+        if len(crop_verts) < 3:
+            self._notify()
+            return None
+
+        # Translate vertex coords from crop-space to image-space and paste
+        # the cleaned mask back into a full-image bool mask.
+        new_vertices = crop_verts + np.array([sx0, sy0], dtype=np.int32)
+        full_mask = np.zeros_like(s_mask)
+        full_mask[sy0:sy1, sx0:sx1] = filtered_crop
+
+        cmd = LassoCloseCommand(new_vertices, region_mask=full_mask)
+        self.history.push(cmd, self.state)
+        self._notify()
+        return "created"
 
     # ---- delete -------------------------------------------------------------
 

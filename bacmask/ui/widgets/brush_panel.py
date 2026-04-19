@@ -1,11 +1,12 @@
 """Contextual brush controls — appears below the toolbar when the brush is active.
 
 Layout (left → right):
-``Brush size`` label · numeric input · slider · ``Add`` toggle · ``Subtract``
-toggle.
+``Brush size`` label · numeric input · slider · ``Create`` · ``Add`` ·
+``Subtract`` toggle.
 
-The toggles drive ``state.brush_default_mode``. Tab flips between them. There
-is no modifier-key override — the toggle is the mode.
+The toggles drive ``state.brush_default_mode``. Tab cycles the modes in the
+order Create → Add → Subtract → Create. There is no modifier-key override —
+the toggle is the mode.
 """
 
 from __future__ import annotations
@@ -58,27 +59,28 @@ class BrushPanel(BoxLayout):
         self._size_input.bind(on_text_validate=self._on_text_validate)
 
         # ---- mode toggles --------------------------------------------------
-        self._add_btn = ToggleButton(
-            text="Add (Tab)",
-            group="bacmask_brush_mode",
-            allow_no_selection=False,
-            state="down" if service.state.brush_default_mode == "add" else "normal",
-            size_hint_x=None,
-            width=120,
-        )
-        self._add_btn.bind(on_release=lambda *_: self._on_mode("add"))
-        self.add_widget(self._add_btn)
-
-        self._sub_btn = ToggleButton(
-            text="Subtract (Tab)",
-            group="bacmask_brush_mode",
-            allow_no_selection=False,
-            state="down" if service.state.brush_default_mode == "subtract" else "normal",
-            size_hint_x=None,
-            width=140,
-        )
-        self._sub_btn.bind(on_release=lambda *_: self._on_mode("subtract"))
-        self.add_widget(self._sub_btn)
+        # Order matches the Tab cycle in MaskService.toggle_brush_default_mode:
+        # Create → Add → Subtract.
+        cur_mode = service.state.brush_default_mode
+        self._mode_btns: dict[str, ToggleButton] = {}
+        for mode, label, width in (
+            ("create", "Create (Tab)", 140),
+            ("add", "Add (Tab)", 110),
+            ("subtract", "Subtract (Tab)", 140),
+        ):
+            btn = ToggleButton(
+                text=label,
+                group="bacmask_brush_mode",
+                allow_no_selection=False,
+                state="down" if cur_mode == mode else "normal",
+                size_hint_x=None,
+                width=width,
+            )
+            # Bind via default arg so the closure captures the mode value, not
+            # the loop variable (Python late-binding gotcha).
+            btn.bind(on_release=lambda *_a, m=mode: self._on_mode(m))
+            self.add_widget(btn)
+            self._mode_btns[mode] = btn
 
         service.subscribe(self._sync_from_state)
 
@@ -126,13 +128,7 @@ class BrushPanel(BoxLayout):
             self._size_slider.value = v
         if self._size_input.text != str(v):
             self._size_input.text = str(v)
-        if state.brush_default_mode == "add":
-            if self._add_btn.state != "down":
-                self._add_btn.state = "down"
-            if self._sub_btn.state != "normal":
-                self._sub_btn.state = "normal"
-        else:
-            if self._sub_btn.state != "down":
-                self._sub_btn.state = "down"
-            if self._add_btn.state != "normal":
-                self._add_btn.state = "normal"
+        for mode, btn in self._mode_btns.items():
+            want = "down" if state.brush_default_mode == mode else "normal"
+            if btn.state != want:
+                btn.state = want

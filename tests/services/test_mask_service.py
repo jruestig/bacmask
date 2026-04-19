@@ -489,13 +489,19 @@ def test_brush_default_mode_drives_unmodified_stroke(tmp_path):
     assert svc.state.active_brush_stroke.mode == "subtract"
 
 
-def test_toggle_brush_default_mode_flips():
+def test_toggle_brush_default_mode_cycles():
+    """Order: create → add → subtract → create."""
     svc = MaskService()
     assert svc.state.brush_default_mode == "add"
     assert svc.toggle_brush_default_mode() == "subtract"
-    assert svc.state.brush_default_mode == "subtract"
+    assert svc.toggle_brush_default_mode() == "create"
     assert svc.toggle_brush_default_mode() == "add"
-    assert svc.state.brush_default_mode == "add"
+
+
+def test_set_brush_default_mode_create():
+    svc = MaskService()
+    svc.set_brush_default_mode("create")
+    assert svc.state.brush_default_mode == "create"
 
 
 # ---- zero-area guard ----
@@ -585,11 +591,17 @@ def _run_brush(
     samples: list[tuple[int, int]],
     mode: str = "add",
 ) -> str | None:
-    """Drive the service through a full brush stroke: begin → samples → end."""
+    """Drive the service through a full brush stroke: begin → samples → end.
+
+    Checks ``state.active_brush_stroke`` (not ``begin_brush_stroke`` return
+    value) to decide whether the stroke actually started — in create mode
+    ``begin_brush_stroke`` returns ``None`` for the target_id even on
+    success, since the stroke isn't bound to any existing region.
+    """
     svc.set_active_tool("brush")
     svc.set_brush_default_mode(mode)
-    target = svc.begin_brush_stroke(samples[0])
-    if target is None:
+    svc.begin_brush_stroke(samples[0])
+    if svc.state.active_brush_stroke is None:
         return None
     for p in samples[1:]:
         svc.add_brush_sample(p)
@@ -758,6 +770,63 @@ def test_brush_no_intersection_is_discarded(tmp_path):
     result = svc.end_brush_stroke()
     assert result is None
     assert len(svc.history) == history_before
+
+
+def test_brush_create_mode_commits_new_region(tmp_path):
+    """Create mode: press-drag-release on empty canvas commits a new region."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    assert len(svc.state.regions) == 0
+    svc.set_brush_radius(4)
+
+    result = _run_brush(svc, [(20, 20), (25, 20), (30, 20)], mode="create")
+    assert result == "created"
+    assert 1 in svc.state.regions
+    assert svc.state.region_masks[1].any()
+    # ID monotonic — next stroke should land on 2.
+    assert svc.state.next_label_id == 2
+
+
+def test_brush_create_mode_ignores_existing_regions(tmp_path):
+    """Create mode does not target the region under the cursor — it always
+    starts a fresh one regardless of press-down location."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))  # region 1
+    before_r1 = svc.state.region_masks[1].copy()
+    svc.set_brush_radius(3)
+
+    # Press inside region 1, but in create mode → makes a new region 2 instead
+    # of editing region 1.
+    result = _run_brush(svc, [(15, 15), (25, 15), (35, 15)], mode="create")
+    assert result == "created"
+    assert 2 in svc.state.regions
+    # Region 1 untouched.
+    assert np.array_equal(svc.state.region_masks[1], before_r1)
+
+
+def test_brush_create_mode_undo(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.set_brush_radius(4)
+    _run_brush(svc, [(20, 20), (25, 20)], mode="create")
+    assert 1 in svc.state.regions
+
+    assert svc.undo() is True
+    assert 1 not in svc.state.regions
+
+
+def test_brush_create_mode_does_not_change_selection(tmp_path):
+    """Selection persists across a create stroke — useful when alternating
+    between create and edit on the same target."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(5, 5, 6))
+    svc.select_region(1)
+    svc.set_brush_radius(3)
+
+    _run_brush(svc, [(30, 30), (35, 30)], mode="create")
+    assert svc.state.selected_region_id == 1
 
 
 def test_cancel_brush_stroke_discards_no_history(tmp_path):

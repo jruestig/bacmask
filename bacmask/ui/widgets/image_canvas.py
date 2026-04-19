@@ -43,6 +43,17 @@ SELECTED_OUTLINE_COLOR = (0.0, 1.0, 1.0, 1.0)  # cyan
 LASSO_PREVIEW_COLOR = (1.0, 1.0, 0.0, 1.0)  # yellow
 BRUSH_ADD_COLOR = (0.2, 1.0, 0.2)  # green RGB (alpha applied per use)
 BRUSH_SUBTRACT_COLOR = (1.0, 0.2, 0.2)  # red RGB
+BRUSH_CREATE_COLOR = (0.3, 0.6, 1.0)  # blue RGB (new region preview)
+
+
+def _brush_color_for(mode: str) -> tuple[float, float, float]:
+    if mode == "subtract":
+        return BRUSH_SUBTRACT_COLOR
+    if mode == "create":
+        return BRUSH_CREATE_COLOR
+    return BRUSH_ADD_COLOR
+
+
 BRUSH_GHOST_ALPHA = 0.55
 BRUSH_CURSOR_ALPHA = 0.95
 
@@ -271,7 +282,7 @@ class ImageCanvas(Widget):
         radius_widget = self.service.state.brush_radius_px * s * self._view_scale
         if radius_widget < 0.5:
             return
-        rgb = BRUSH_ADD_COLOR if mode == "add" else BRUSH_SUBTRACT_COLOR
+        rgb = _brush_color_for(mode)
         Color(rgb[0], rgb[1], rgb[2], BRUSH_GHOST_ALPHA)
         if len(self._brush_preview_pts) == 1:
             ix, iy = self._brush_preview_pts[0]
@@ -306,9 +317,10 @@ class ImageCanvas(Widget):
         wx, wy = self._last_pointer_pos
         stroke = self.service.state.active_brush_stroke
         if stroke is not None:
-            rgb = BRUSH_ADD_COLOR if stroke.mode == "add" else BRUSH_SUBTRACT_COLOR
+            mode = stroke.mode
         else:
-            rgb = BRUSH_ADD_COLOR
+            mode = self.service.state.brush_default_mode
+        rgb = _brush_color_for(mode)
         Color(rgb[0], rgb[1], rgb[2], BRUSH_CURSOR_ALPHA)
         Line(
             circle=(wx, wy, radius_px_widget),

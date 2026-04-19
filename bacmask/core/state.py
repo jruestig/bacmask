@@ -17,8 +17,10 @@ Tool = Literal["lasso", "brush"]
 class BrushStroke:
     """In-progress brush stroke buffer. See knowledge/026."""
 
-    target_id: int
-    mode: Literal["add", "subtract"]
+    # Target region's label_id, or ``None`` for ``mode == "create"`` (the
+    # stroke commits as a brand-new region with a fresh id).
+    target_id: int | None
+    mode: Literal["add", "subtract", "create"]
     # Bool mask of accumulated brush footprint in image space.
     mask: np.ndarray
     # Last image-space sample for line-sweep continuity between PointerMoves.
@@ -55,10 +57,11 @@ class SessionState:
     active_tool: Tool = "lasso"
     # Image-space radius for the brush stamp. Session-local (knowledge/026).
     brush_radius_px: int = defaults.BRUSH_RADIUS_DEFAULT_PX
-    # Persistent default brush mode. Modifier keys at press-down still
-    # override per knowledge/026 (Ctrl→subtract, Shift→add); this is the
-    # unmodified default driven by the toolbar Add/Subtract toggles.
-    brush_default_mode: Literal["add", "subtract"] = "add"
+    # Persistent default brush mode — driven by the brush-panel toggle
+    # buttons. ``create`` makes press-drag-release commit a brand-new region
+    # built from the painted blob; ``add``/``subtract`` edit the locked
+    # target. See knowledge/026.
+    brush_default_mode: Literal["add", "subtract", "create"] = "add"
     # Per-stroke buffer. None when no brush stroke is in flight.
     active_brush_stroke: BrushStroke | None = None
     dirty: bool = False

@@ -35,7 +35,11 @@ Press-drag-release with the brush tool active:
    - If neither the pressed pixel nor the selection resolves to an existing region → stroke is a **no-op**. The brush still cannot create new regions; that is the lasso's job. No history entry.
    - Once resolved the target is locked for the entire stroke. Dragging across other regions or off the canvas does **not** re-target.
    - The brush's target and the results-panel highlight / cyan outline are the same id — "the region my next action will touch" is the same as "the region I'm currently focused on."
-2. **Mode (add vs. subtract)** is read at press-down from `state.brush_default_mode`. The mode is set by the toolbar Add / Subtract toggles in the brush panel and flipped with the **Tab** hotkey. There is **no modifier-key override** — the toggle is the mode. Switching the toggle mid-stroke does not affect the in-flight stroke; the read is at press-down only.
+2. **Mode** is read at press-down from `state.brush_default_mode`. Three values:
+   - `create` — the stroke commits a brand-new region (LassoCloseCommand) built from the painted blob; it does not target any existing region. Press-down location is irrelevant beyond seeding the first stamp; the rule in step 1 about target resolution does **not** apply.
+   - `add` — paint extends the locked target region (`target | S`).
+   - `subtract` — paint removes pixels from the locked target (`target & ~S`).
+   The mode is set by the brush-panel toggles or cycled with **Tab**. Cycle order is `create → add → subtract → create`. There is **no modifier-key override** — the toggle is the mode. Switching the toggle mid-stroke does not affect the in-flight stroke; the read is at press-down only.
 3. **Drag** accumulates pointer samples. Each sample stamps a filled disc of radius `brush_radius_px` into the stroke's temp bool mask `S`.
    - Between samples, the disc is swept along the straight segment (`cv2.line` with `thickness = 2 * brush_radius_px`) so there are no gaps at fast cursor speeds.
    - `S` lives in the stroke buffer only; the stored region's mask is not touched until release.

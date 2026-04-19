@@ -109,10 +109,11 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
      - Keyboard close: `Enter` (equivalent trigger for stylus loss-of-contact).
      - Cancel in-progress lasso: `Escape`.
      - Lassos with fewer than 3 points or zero enclosed area are silently discarded.
-   - **Brush (`B`)** — edits existing regions ([knowledge/026](knowledge/026-brush-edit-model.md)). Select the brush tool, then press-drag:
-     - Mode (add / subtract) is set via the **Add** / **Subtract** toggles in the brush panel and flipped with **`Tab`**. There is no modifier-key override — the toggle is the mode.
-     - The target locks at press-down: a hit on an existing region selects + targets it; press-down on background uses the currently selected region as target. This lets a subtract begin off the boundary and carve in from outside.
-     - With no selected region, a press on background is a no-op. The brush cannot create new regions.
+   - **Brush (`B`)** — three modes ([knowledge/026](knowledge/026-brush-edit-model.md)). Select the brush tool, then press-drag:
+     - Mode is set via the **Create** / **Add** / **Subtract** toggles in the brush panel and cycled with **`Tab`** (order: create → add → subtract).
+     - **Create** mode: press-drag-release commits a brand-new region built from the painted blob. Press-down location is irrelevant — the brush ignores any existing region under the cursor.
+     - **Add / Subtract** modes target an existing region. The target locks at press-down: a hit on a region selects + targets it; press-down on background uses the currently selected region as target. This lets a subtract begin off the boundary and carve in from outside.
+     - In add/subtract with no selected region, press on background is a no-op.
      - If a subtract empties the region entirely, the edit resolves as a Delete.
      - Overlap with other regions is allowed — edits are strictly per-target ([knowledge/025](knowledge/025-overlapping-regions.md)).
      - Brush radius is a session-local scalar in a toolbar numeric field (default 8 px, image-space).
