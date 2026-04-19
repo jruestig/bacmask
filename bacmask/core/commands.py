@@ -131,60 +131,6 @@ class DeleteRegionCommand:
 
 
 @dataclass
-class VertexEditCommand:
-    """Replace a region's polygon with a new vertex list.
-
-    Kept as a thin compatibility shim for the ``MaskService.edit_vertices``
-    entrypoint — wave 2 step 2 deletes both. The body is now identical to
-    :class:`BrushStrokeCommand` minus the target-shape-mismatch guard.
-    """
-
-    label_id: int
-    new_vertices: np.ndarray
-    _old_vertices: list[list[int]] | None = field(init=False, default=None)
-
-    def apply(self, state: Any) -> None:
-        if self.label_id not in state.regions:
-            raise ValueError(f"region {self.label_id} does not exist")
-        if state.label_map is None:
-            raise ValueError("state.label_map is not initialized")
-
-        new_verts = np.asarray(self.new_vertices, dtype=np.int32).reshape(-1, 2)
-        if len(new_verts) < 3:
-            raise ValueError(f"polygon needs at least 3 vertices, got {len(new_verts)}")
-
-        self._old_vertices = [list(v) for v in state.regions[self.label_id]["vertices"]]
-        old_verts = np.asarray(self._old_vertices, dtype=np.int32).reshape(-1, 2)
-        state.regions[self.label_id]["vertices"] = new_verts.tolist()
-        bbox = _union_bbox(
-            masking.vertices_bbox(old_verts, state.label_map.shape),
-            masking.vertices_bbox(new_verts, state.label_map.shape),
-        )
-        if bbox is not None:
-            masking.paint_label_map_bbox(state.label_map, state.regions, bbox)
-        state.dirty = True
-        state.regions_version += 1
-
-    def undo(self, state: Any) -> None:
-        if self._old_vertices is None or self.label_id not in state.regions:
-            return
-        current = np.asarray(state.regions[self.label_id]["vertices"], dtype=np.int32).reshape(
-            -1, 2
-        )
-        old_verts = np.asarray(self._old_vertices, dtype=np.int32).reshape(-1, 2)
-        state.regions[self.label_id]["vertices"] = [list(v) for v in self._old_vertices]
-        if state.label_map is not None:
-            bbox = _union_bbox(
-                masking.vertices_bbox(current, state.label_map.shape),
-                masking.vertices_bbox(old_verts, state.label_map.shape),
-            )
-            if bbox is not None:
-                masking.paint_label_map_bbox(state.label_map, state.regions, bbox)
-        state.dirty = True
-        state.regions_version += 1
-
-
-@dataclass
 class BrushStrokeCommand:
     """Commit the result of an add/subtract brush stroke (knowledge/026, 030).
 

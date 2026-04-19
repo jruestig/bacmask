@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import zipfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 
 import cv2
@@ -24,7 +24,6 @@ from bacmask.core.commands import (
     BrushStrokeCommand,
     DeleteRegionCommand,
     LassoCloseCommand,
-    VertexEditCommand,
 )
 from bacmask.core.history import UndoRedoStack
 from bacmask.core.state import BrushStroke, SessionState, Tool
@@ -262,18 +261,6 @@ class MaskService:
         self.state.active_lasso = None
         self._notify()
         return cmd.assigned_label_id
-
-    # ---- vertex edit --------------------------------------------------------
-
-    def edit_vertices(
-        self,
-        label_id: int,
-        new_vertices: Sequence[tuple[int, int]] | np.ndarray,
-    ) -> None:
-        verts = np.asarray(new_vertices, dtype=np.int32)
-        cmd = VertexEditCommand(label_id=label_id, new_vertices=verts)
-        self.history.push(cmd, self.state)
-        self._notify()
 
     # ---- brush stroke (knowledge/026) ---------------------------------------
 

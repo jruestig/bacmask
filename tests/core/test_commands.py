@@ -1,12 +1,10 @@
 import numpy as np
 import pytest
 
-from bacmask.core import masking
 from bacmask.core.commands import (
     BrushStrokeCommand,
     DeleteRegionCommand,
     LassoCloseCommand,
-    VertexEditCommand,
 )
 from bacmask.core.state import SessionState
 
@@ -24,12 +22,6 @@ def _square_verts(x0: int = 10, y0: int = 10, size: int = 10) -> np.ndarray:
         [[x0, y0], [x0 + size, y0], [x0 + size, y0 + size], [x0, y0 + size]],
         dtype=np.int32,
     )
-
-
-def _region_mask(state: SessionState, label_id: int) -> np.ndarray:
-    """Derive a region's bool mask from its canonical polygon."""
-    verts = np.asarray(state.regions[label_id]["vertices"], dtype=np.int32)
-    return masking.rasterize_polygon_mask(verts, state.label_map.shape)
 
 
 # ---- LassoCloseCommand -------------------------------------------------------
@@ -104,141 +96,6 @@ def test_deleted_id_is_not_reused_by_next_lasso():
     second.apply(s)
     assert second.assigned_label_id == 2
     assert 1 not in s.regions
-
-
-# ---- VertexEditCommand -------------------------------------------------------
-
-
-def test_vertex_edit_moves_pixels_same_id():
-    s = _state()
-    LassoCloseCommand(_square_verts(10, 10, 10)).apply(s)
-    # Shift rectangle right by 5.
-    new_verts = np.array([[15, 10], [25, 10], [25, 20], [15, 20]], dtype=np.int32)
-    VertexEditCommand(label_id=1, new_vertices=new_verts).apply(s)
-
-    assert s.label_map[10, 10] == 0  # old corner now background
-    ys, xs = np.where(s.label_map == 1)
-    assert int(xs.min()) == 15
-    assert int(xs.max()) == 25
-
-
-def test_vertex_edit_updates_region_vertices():
-    s = _state()
-    LassoCloseCommand(_square_verts()).apply(s)
-    new_verts = np.array([[15, 10], [25, 10], [25, 20], [15, 20]], dtype=np.int32)
-    VertexEditCommand(label_id=1, new_vertices=new_verts).apply(s)
-    assert s.regions[1]["vertices"] == [
-        [15, 10],
-        [25, 10],
-        [25, 20],
-        [15, 20],
-    ]
-
-
-def test_vertex_edit_undo_restores_pixels_and_vertices():
-    s = _state()
-    LassoCloseCommand(_square_verts()).apply(s)
-    before_map = s.label_map.copy()
-    before_verts = list(s.regions[1]["vertices"])
-
-    new_verts = np.array([[15, 10], [25, 10], [25, 20], [15, 20]], dtype=np.int32)
-    cmd = VertexEditCommand(label_id=1, new_vertices=new_verts)
-    cmd.apply(s)
-    cmd.undo(s)
-
-    assert np.array_equal(s.label_map, before_map)
-    assert s.regions[1]["vertices"] == before_verts
-
-
-def test_vertex_edit_apply_undo_apply_is_idempotent():
-    s = _state()
-    LassoCloseCommand(_square_verts()).apply(s)
-    new_verts = np.array([[15, 10], [25, 10], [25, 20], [15, 20]], dtype=np.int32)
-    cmd = VertexEditCommand(label_id=1, new_vertices=new_verts)
-    cmd.apply(s)
-    after_map = s.label_map.copy()
-    after_verts = list(s.regions[1]["vertices"])
-    cmd.undo(s)
-    cmd.apply(s)
-
-    assert np.array_equal(s.label_map, after_map)
-    assert s.regions[1]["vertices"] == after_verts
-
-
-def test_vertex_edit_allows_overlap_with_neighbor():
-    """No clip rule (knowledge/025). Region 1's expanded polygon encloses
-    pixels that region 2 also claims; region 2's polygon is unchanged; the
-    display label_map shows the higher id on the overlap.
-    """
-    s = _state(h=50, w=50)
-    LassoCloseCommand(np.array([[5, 5], [15, 5], [15, 15], [5, 15]], dtype=np.int32)).apply(
-        s
-    )  # region 1
-    LassoCloseCommand(np.array([[20, 5], [30, 5], [30, 15], [20, 15]], dtype=np.int32)).apply(
-        s
-    )  # region 2
-
-    region2_verts_before = list(s.regions[2]["vertices"])
-
-    # Edit region 1 to extend into region 2's column range.
-    new_verts = np.array([[5, 5], [25, 5], [25, 15], [5, 15]], dtype=np.int32)
-    VertexEditCommand(label_id=1, new_vertices=new_verts).apply(s)
-
-    # Region 2's polygon is untouched.
-    assert s.regions[2]["vertices"] == region2_verts_before
-    # Region 1's derived mask now claims the overlap pixel.
-    assert _region_mask(s, 1)[10, 22]
-    # Display cache: higher id on overlap; label 1 in the newly-claimed gap.
-    assert s.label_map[10, 22] == 2
-    assert s.label_map[10, 18] == 1
-
-
-def test_vertex_edit_overlap_is_reversible():
-    s = _state(h=50, w=50)
-    LassoCloseCommand(np.array([[5, 5], [15, 5], [15, 15], [5, 15]], dtype=np.int32)).apply(s)
-    LassoCloseCommand(np.array([[20, 5], [30, 5], [30, 15], [20, 15]], dtype=np.int32)).apply(s)
-    before_map = s.label_map.copy()
-    before_r1_verts = list(s.regions[1]["vertices"])
-    before_r2_verts = list(s.regions[2]["vertices"])
-
-    new_verts = np.array([[5, 5], [25, 5], [25, 15], [5, 15]], dtype=np.int32)
-    cmd = VertexEditCommand(label_id=1, new_vertices=new_verts)
-    cmd.apply(s)
-    cmd.undo(s)
-
-    assert np.array_equal(s.label_map, before_map)
-    assert s.regions[1]["vertices"] == before_r1_verts
-    assert s.regions[2]["vertices"] == before_r2_verts
-
-
-def test_vertex_edit_rejects_fewer_than_3_vertices():
-    s = _state()
-    LassoCloseCommand(_square_verts()).apply(s)
-    with pytest.raises(ValueError):
-        VertexEditCommand(
-            label_id=1,
-            new_vertices=np.array([[10, 10], [20, 10]], dtype=np.int32),
-        ).apply(s)
-
-
-def test_vertex_edit_rejects_unknown_label():
-    s = _state()
-    with pytest.raises(ValueError):
-        VertexEditCommand(
-            label_id=42,
-            new_vertices=np.array([[10, 10], [20, 10], [20, 20]], dtype=np.int32),
-        ).apply(s)
-
-
-def test_vertex_edit_shape_change_no_other_region():
-    """Edit that changes shape significantly (triangle → pentagon) with no collisions."""
-    s = _state()
-    LassoCloseCommand(_square_verts(5, 5, 10)).apply(s)
-    new_verts = np.array([[5, 5], [15, 5], [18, 10], [15, 15], [5, 15]], dtype=np.int32)
-    VertexEditCommand(label_id=1, new_vertices=new_verts).apply(s)
-    # Pentagon extends to x=18 now.
-    ys, xs = np.where(s.label_map == 1)
-    assert int(xs.max()) >= 17
 
 
 # ---- BrushStrokeCommand -------------------------------------------------------
