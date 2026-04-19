@@ -30,6 +30,7 @@ class LassoCloseCommand:
         }
         state.next_label_id += 1
         state.dirty = True
+        state.regions_version += 1
 
     def undo(self, state: Any) -> None:
         state.region_masks.pop(self.assigned_label_id, None)
@@ -38,6 +39,7 @@ class LassoCloseCommand:
         masking.repaint_label_map(state.label_map, state.region_masks)
         state.next_label_id = self._prev_next_id
         state.dirty = True
+        state.regions_version += 1
 
 
 @dataclass
@@ -53,6 +55,7 @@ class DeleteRegionCommand:
         # underneath if they overlapped.
         masking.repaint_label_map(state.label_map, state.region_masks)
         state.dirty = True
+        state.regions_version += 1
 
     def undo(self, state: Any) -> None:
         if self._region_mask is not None:
@@ -61,6 +64,7 @@ class DeleteRegionCommand:
             state.regions[self.label_id] = self._region_meta
         masking.repaint_label_map(state.label_map, state.region_masks)
         state.dirty = True
+        state.regions_version += 1
 
 
 @dataclass
@@ -99,6 +103,7 @@ class VertexEditCommand:
 
         state.regions[self.label_id]["vertices"] = new_verts.tolist()
         state.dirty = True
+        state.regions_version += 1
 
     def undo(self, state: Any) -> None:
         if self._old_vertices is None:
@@ -110,6 +115,7 @@ class VertexEditCommand:
         masking.repaint_label_map(state.label_map, state.region_masks)
         state.regions[self.label_id]["vertices"] = self._old_vertices
         state.dirty = True
+        state.regions_version += 1
 
 
 @dataclass
@@ -154,6 +160,7 @@ class RegionEditCommand:
         state.regions[self.label_id]["vertices"] = new_verts.tolist()
         masking.repaint_label_map(state.label_map, state.region_masks)
         state.dirty = True
+        state.regions_version += 1
 
     def undo(self, state: Any) -> None:
         if self._old_vertices is None:
@@ -166,3 +173,4 @@ class RegionEditCommand:
             state.regions[self.label_id]["vertices"] = self._old_vertices
         masking.repaint_label_map(state.label_map, state.region_masks)
         state.dirty = True
+        state.regions_version += 1

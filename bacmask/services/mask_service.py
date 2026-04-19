@@ -85,6 +85,7 @@ class MaskService:
         self.state.active_lasso = None
         self.state.selected_region_id = None
         self.state.dirty = False
+        self.state.regions_version += 1
         self.history.clear()
         self._active_lasso = []
         self._notify()
@@ -93,12 +94,15 @@ class MaskService:
 
     def begin_lasso(self, pos: tuple[int, int]) -> None:
         self._active_lasso = [pos]
-        self.state.active_lasso = np.asarray(self._active_lasso, dtype=np.int32)
+        # Expose the *same* list reference: consumers (canvas preview) iterate
+        # the live buffer. Avoids allocating a fresh ndarray on every sample,
+        # which was O(N) per move and dominated long-stroke cost.
+        self.state.active_lasso = self._active_lasso
         self._notify()
 
     def add_lasso_point(self, pos: tuple[int, int]) -> None:
         self._active_lasso.append(pos)
-        self.state.active_lasso = np.asarray(self._active_lasso, dtype=np.int32)
+        # state.active_lasso already points at this same list — no reassign.
         self._notify()
 
     def cancel_lasso(self) -> None:

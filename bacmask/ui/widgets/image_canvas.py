@@ -54,6 +54,9 @@ class ImageCanvas(Widget):
         self._image_texture: Texture | None = None
         self._overlay_texture: Texture | None = None
         self._last_image: np.ndarray | None = None
+        # -1 forces overlay rebuild on the first state notification even when
+        # `regions_version` is still 0 (e.g. bundle loaded into a fresh state).
+        self._last_regions_version: int = -1
         self._input = DesktopInputAdapter(emit=self._on_input)
 
         # UI-local view transform (not persisted, not in SessionState).
@@ -70,15 +73,20 @@ class ImageCanvas(Widget):
         # Image texture rebuilds only when the image object actually changes
         # (rare — on load_image / load_bundle). Also reset view transform
         # because the old pan/zoom is meaningless for a new image.
-        if self.service.state.image is not self._last_image:
+        state = self.service.state
+        if state.image is not self._last_image:
             self._rebuild_image_texture()
-            self._last_image = self.service.state.image
+            self._last_image = state.image
             self._view_scale = 1.0
             self._view_offset = (0.0, 0.0)
-        # Overlay texture rebuilds whenever label_map could have changed
-        # (everything except in-progress lasso drag).
-        if self.service.state.active_lasso is None:
+            # Force overlay rebuild at the new image dimensions.
+            self._last_regions_version = -1
+        # Overlay texture only rebuilds when regions actually change. Selection
+        # / edit-mode / calibration notifies skip this (and the per-frame lasso
+        # drag notifies too — they don't touch regions_version).
+        if state.regions_version != self._last_regions_version:
             self._rebuild_overlay_texture()
+            self._last_regions_version = state.regions_version
         self._repaint()
 
     def _rebuild_image_texture(self) -> None:
@@ -196,10 +204,7 @@ class ImageCanvas(Widget):
             # In-progress lasso polyline preview
             lasso = self.service.state.active_lasso
             if lasso is not None and len(lasso) >= 2:
-                pts = self._image_points_to_widget(
-                    lasso.tolist() if isinstance(lasso, np.ndarray) else lasso,
-                    (img_w, img_h),
-                )
+                pts = self._image_points_to_widget(lasso, (img_w, img_h))
                 Color(*LASSO_PREVIEW_COLOR)
                 Line(points=pts, width=1.2)
 
@@ -209,26 +214,30 @@ class ImageCanvas(Widget):
 
     def _image_points_to_widget(
         self,
-        pts: list,
+        pts,
         image_size: tuple[int, int],
     ) -> list[float]:
-        """Map a list of image-space (x, y) points to a flat widget-space [x, y, ...] list.
+        """Map image-space ``(x, y)`` points to a flat widget-space [x, y, ...] list.
 
-        Flips Y because image origin is top-left, widget (Kivy) origin is bottom-left.
-        Includes the UI-local view transform (zoom/pan).
+        Accepts any iterable of (x, y) pairs (list of tuples, ndarray, etc.).
+        Flips Y (image top-left → Kivy bottom-left) and applies the view transform.
+        Vectorized with numpy so long lasso strokes don't pay a Python-loop cost
+        per PointerMove.
         """
         img_w, img_h = image_size
-        out: list[float] = []
-        for px, py in pts:
-            wx, wy = image_utils.image_to_display_view(
-                (float(px), float(py)),
-                (img_w, img_h),
-                (self.width, self.height),
-                self._view_scale,
-                self._view_offset,
-            )
-            out.extend([self.x + wx, self.y + self.height - wy])
-        return out
+        s, off_x, off_y, _, _ = image_utils.fit_to_widget((img_w, img_h), (self.width, self.height))
+        total = s * self._view_scale
+        vox, voy = self._view_offset
+        arr = np.asarray(pts, dtype=np.float32).reshape(-1, 2)
+        if arr.size == 0:
+            return []
+        xs = arr[:, 0] * total + off_x + vox + self.x
+        ys_top = arr[:, 1] * total + off_y + voy
+        ys = self.y + self.height - ys_top
+        out = np.empty(arr.shape[0] * 2, dtype=np.float32)
+        out[0::2] = xs
+        out[1::2] = ys
+        return out.tolist()
 
     # ---- input -------------------------------------------------------------
 

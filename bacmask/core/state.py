@@ -26,10 +26,17 @@ class SessionState:
     region_masks: dict[int, np.ndarray] = field(default_factory=dict)
     next_label_id: int = 1
     scale_mm_per_px: float | None = None
-    active_lasso: np.ndarray | None = None
+    # During drag this holds the growing list of captured samples; ndarray once
+    # committed; None when no stroke is in progress. A plain list avoids the
+    # per-move O(N) reallocation a fresh ndarray would cost on every sample.
+    active_lasso: np.ndarray | list[tuple[int, int]] | None = None
     selected_region_id: int | None = None
     edit_mode: bool = False
     dirty: bool = False
+    # Monotonic counter bumped whenever `regions` or `region_masks` change.
+    # Canvas watches this to gate the (expensive) overlay-texture rebuild so
+    # selection / mode / calibration notifies don't trigger a full repaint.
+    regions_version: int = 0
 
     def set_image(self, image: np.ndarray, path: Path) -> None:
         self.image = image
@@ -45,3 +52,4 @@ class SessionState:
         self.active_lasso = None
         self.selected_region_id = None
         self.dirty = False
+        self.regions_version += 1
