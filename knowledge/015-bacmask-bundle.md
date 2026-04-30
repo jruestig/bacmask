@@ -5,7 +5,7 @@ tags: [architecture, core]
 created: 2026-04-17
 updated: 2026-04-19
 status: accepted
-related: [011, 014, 017, 024, 025]
+related: [011, 014, 017, 024, 025, 032]
 ---
 
 # .bacmask Bundle Format
@@ -55,7 +55,7 @@ project.bacmask/
 
 ## What Save writes
 - `Save` (toolbar button, `Ctrl+S`) writes **only** the bundle. No CSV, no mask files.
-- One file per image: `<image_stem>.bacmask`.
+- One file per image: `<image_stem>.bacmask`. Path is user-chosen via a Save As dialog ([032](032-save-as-dialog.md)) — no fixed output directory.
 - `updated_at` is refreshed on every save. `created_at` is stable after initial creation.
 
 ## What Export writes

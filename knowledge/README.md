@@ -67,6 +67,9 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Preserves c
 ### Navigation (2026-04-19)
 - [031 — Minimap Navigator + Keyboard Pan](031-minimap-navigator.md)
 
+### File I/O UX (2026-04-30)
+- [032 — Save As / Export As Dialog (User-Chosen Path)](032-save-as-dialog.md) — Save/Export prompt for path; New Folder button; modal popups suppress global shortcuts; output dirs no longer auto-created.
+
 ### Superseded (archived in [`superseded/`](superseded/))
 Retired decisions kept for reasoning trails and decision-record context. Do **not** implement against these — each carries a banner pointing to its replacement.
 
