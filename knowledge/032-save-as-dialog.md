@@ -15,10 +15,10 @@ Save (`Ctrl+S`) and Export CSV (`Ctrl+E`) open a **Save As-style file chooser**.
 
 ## Behaviour
 
-- **Default location:** `last-used output dir this session` → image's directory → `Path.cwd()`.
+- **Default location:** loaded image's directory → `Path.cwd()` (fallback if the image path's parent is somehow gone). No cross-image stickiness — loading a new image immediately re-targets the dialog.
 - **Default filename:** pre-filled to `<image_stem>.bacmask` (Save) or `<image_stem>_areas.csv` (Export). Editable.
 - **Extension safety:** if the user clears or changes the extension, it's restored to `.bacmask` / `.csv` on confirm. Whatever the user typed in the stem is preserved.
-- **Session memory:** after a successful write, the chosen parent is cached as `_last_output_dir` on `BacMaskApp`. **Save and Export share this cache** — exporting after a save opens at the bundle's folder, and saving after an export opens at the CSV's folder. Not persisted across runs.
+- **No session memory of output dir.** Earlier revisions cached `_last_save_dir` / `_last_export_dir` (later collapsed to a single `_last_output_dir`). Both removed — once you'd saved once, every subsequent image's dialog opened at the *old* folder, not the new image's folder. The image directory is the only sane default for this tool: bundles + CSVs belong next to the image they describe. Users who want a different output root can navigate there in the chooser (now ergonomic with the breadcrumb bar — see [033](033-file-picker-breadcrumb-bar.md)).
 - **No directory pre-creation.** The app never creates `output/bundles/` or `output/areas/` on startup or on dialog open. The only `mkdir` happens on the user-confirmed path's parent at write time, so saving into a fresh subdir works without leaving stray empty directories behind on cancel.
 - **New Folder button** inside the dialog: prompts for a name, creates the folder under the chooser's current path, then navigates the chooser into it. Rejects names containing `/` or `\`, and refuses to overwrite an existing directory.
 
