@@ -28,8 +28,7 @@ class BacMaskApp(App):
     def __init__(self, initial_path: Path | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._initial_path = initial_path
-        self._last_save_dir: Path | None = None
-        self._last_export_dir: Path | None = None
+        self._last_output_dir: Path | None = None
         self._open_modal_count: int = 0
 
     def build(self) -> MainScreen:
@@ -246,7 +245,7 @@ class BacMaskApp(App):
             return
 
         stem = Path(state.image_filename).stem
-        start_dir = self._last_save_dir or _image_dir(state) or Path.cwd()
+        start_dir = self._last_output_dir or _image_dir(state) or Path.cwd()
 
         def do_save(out_path: Path) -> None:
             if out_path.suffix.lower() != ".bacmask":
@@ -254,7 +253,7 @@ class BacMaskApp(App):
             try:
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 self.service.save_bundle(out_path)
-                self._last_save_dir = out_path.parent
+                self._last_output_dir = out_path.parent
                 _popup(f"Saved:\n{out_path}", title="Saved")
             except Exception as e:
                 _popup(f"Save failed: {e}", title="Error")
@@ -273,7 +272,7 @@ class BacMaskApp(App):
             return
 
         stem = Path(state.image_filename).stem
-        start_dir = self._last_export_dir or _image_dir(state) or Path.cwd()
+        start_dir = self._last_output_dir or _image_dir(state) or Path.cwd()
 
         def do_export(out_path: Path) -> None:
             if out_path.suffix.lower() != ".csv":
@@ -281,7 +280,7 @@ class BacMaskApp(App):
             try:
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 self.service.export_csv(out_path)
-                self._last_export_dir = out_path.parent
+                self._last_output_dir = out_path.parent
                 _popup(f"Exported:\n{out_path}", title="Exported")
             except Exception as e:
                 _popup(f"Export failed: {e}", title="Error")

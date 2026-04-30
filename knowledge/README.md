@@ -70,6 +70,7 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Preserves c
 ### File I/O UX (2026-04-30)
 - [032 — Save As / Export As Dialog (User-Chosen Path)](032-save-as-dialog.md) — Save/Export prompt for path; New Folder button; modal popups suppress global shortcuts; output dirs no longer auto-created.
 - [033 — File Picker Breadcrumb Path Bar](033-file-picker-breadcrumb-bar.md) — clickable path segments above every chooser; one-click jump to any ancestor.
+- [034 — Windows "Open with BacMask" for Image Files](034-windows-image-open-with.md) — opt-in installer task; OpenWithProgids only; never becomes default.
 
 ### Superseded (archived in [`superseded/`](superseded/))
 Retired decisions kept for reasoning trails and decision-record context. Do **not** implement against these — each carries a banner pointing to its replacement.

@@ -37,11 +37,17 @@ iscc packaging\installer.iss
 
 Outputs `dist\bacmask-setup-<ver>.exe`. By default the installer is per-user
 (no admin prompt); users can opt into a machine-wide install via the privilege
-dialog. Two optional tasks are exposed in the wizard:
+dialog. Three optional tasks are exposed in the wizard:
 
 - **Desktop shortcut** — off by default.
 - **Associate `.bacmask` files** — off by default. Double-click opens the
   bundle via `bacmask.exe <path>` (argv handled in `main.py`).
+- **Add to image "Open with" menu** — off by default. Adds BacMask as a
+  secondary handler for `.tif`, `.tiff`, `.png`, `.jpg`, `.jpeg`, `.bmp`
+  using `OpenWithProgids`. BacMask appears under right-click → *Open with*
+  but does **not** become the default — Photos / IrfanView / etc. stay in
+  charge. Users can promote it to default themselves via Windows' "Choose
+  another app → Always use this app" dialog.
 
 The installer does **not** delete `%LOCALAPPDATA%\BacMask` on uninstall —
 user bundles/CSVs are treated as user work, not install artifacts.

@@ -16,6 +16,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO / "pyproject.toml"
+UV_LOCK = REPO / "uv.lock"
 VERSION_INFO = REPO / "packaging" / "version_info.txt"
 INSTALLER = REPO / "packaging" / "installer.iss"
 
@@ -71,12 +72,17 @@ def bump(version: str) -> None:
     print(f"  {INSTALLER.relative_to(REPO)}")
 
 
+def relock() -> None:
+    subprocess.run(["uv", "lock"], check=True, cwd=REPO)
+    print(f"  {UV_LOCK.relative_to(REPO)}")
+
+
 def git(*args: str) -> None:
     subprocess.run(["git", *args], check=True, cwd=REPO)
 
 
 def commit_and_tag(version: str) -> None:
-    git("add", str(PYPROJECT), str(VERSION_INFO), str(INSTALLER))
+    git("add", str(PYPROJECT), str(UV_LOCK), str(VERSION_INFO), str(INSTALLER))
     git("commit", "-m", f"chore: bump version to {version}")
     git("tag", f"v{version}")
     git("push")
@@ -94,6 +100,7 @@ def main() -> None:
     )
     args = ap.parse_args()
     bump(args.version)
+    relock()
     if args.tag:
         commit_and_tag(args.version)
 
