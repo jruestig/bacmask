@@ -4,7 +4,7 @@ title: Save As / Export As Dialog (User-Chosen Path)
 tags: [ui]
 created: 2026-04-30
 status: accepted
-related: [015, 011, 028]
+related: [015, 011, 028, 033]
 ---
 
 # Save As / Export As Dialog (User-Chosen Path)
@@ -58,3 +58,4 @@ Users routinely need a fresh per-experiment subfolder at save time, and the alte
 - [015 — .bacmask Bundle Format](015-bacmask-bundle.md) — what Save writes; path is now user-chosen.
 - [011 — CSV for Area Output](011-csv-for-area-output.md) — what Export writes; same.
 - [028 — File Picker Double-Click](028-file-picker-double-click.md) — sister rule for the load-side picker.
+- [033 — File Picker Breadcrumb Path Bar](033-file-picker-breadcrumb-bar.md) — breadcrumb mounts inside this dialog and the load dialog.

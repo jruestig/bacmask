@@ -13,6 +13,7 @@ from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
 from bacmask.core.state import SessionState
@@ -199,6 +200,7 @@ class BacMaskApp(App):
             ],
         )
         box = BoxLayout(orientation="vertical")
+        box.add_widget(_make_path_bar(chooser))
         box.add_widget(chooser)
 
         btn_box = BoxLayout(size_hint_y=None, height=34, spacing=4)
@@ -303,6 +305,7 @@ class BacMaskApp(App):
         chooser = FileChooserListView(path=str(start_dir), dirselect=False)
 
         box = BoxLayout(orientation="vertical")
+        box.add_widget(_make_path_bar(chooser))
         box.add_widget(chooser)
 
         name_row = BoxLayout(size_hint_y=None, height=34, spacing=4)
@@ -408,6 +411,54 @@ def _image_dir(state: SessionState) -> Path | None:
 
 def _popup(text: str, title: str = "BacMask") -> None:
     Popup(title=title, content=Label(text=text), size_hint=(0.6, 0.35)).open()
+
+
+def _make_path_bar(chooser: FileChooserListView) -> ScrollView:
+    """Breadcrumb bar above ``chooser`` — click a segment to jump there."""
+    scroll = ScrollView(
+        size_hint_y=None,
+        height=30,
+        do_scroll_x=True,
+        do_scroll_y=False,
+        bar_width=4,
+    )
+    bar = BoxLayout(
+        orientation="horizontal",
+        size_hint_x=None,
+        spacing=2,
+        padding=(4, 0),
+    )
+    bar.bind(minimum_width=bar.setter("width"))
+    scroll.add_widget(bar)
+
+    def rebuild(*_: Any) -> None:
+        bar.clear_widgets()
+        p = Path(chooser.path)
+        parts = [p, *p.parents]
+        parts.reverse()
+        for i, seg in enumerate(parts):
+            label = seg.name or str(seg)  # root → "/" or drive letter
+            btn = Button(
+                text=label,
+                size_hint=(None, 1),
+                padding=(8, 0),
+            )
+            btn.texture_update()
+            btn.width = max(40, btn.texture_size[0] + 16)
+            btn.bind(on_release=lambda _b, target=str(seg): _set_chooser_path(chooser, target))
+            bar.add_widget(btn)
+            if i < len(parts) - 1:
+                sep = Label(text="/", size_hint=(None, 1), width=12)
+                bar.add_widget(sep)
+
+    chooser.bind(path=rebuild)
+    rebuild()
+    return scroll
+
+
+def _set_chooser_path(chooser: FileChooserListView, target: str) -> None:
+    if Path(target).is_dir():
+        chooser.path = target
 
 
 def main(initial_path: Path | None = None) -> None:

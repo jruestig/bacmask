@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.togglebutton import ToggleButton
@@ -102,7 +103,7 @@ class Toolbar(BoxLayout):
         # Calibration sits right next to the Brush button. ``size_hint_y=1``
         # overrides the widget's standalone default so the inputs fill the
         # toolbar's full height.
-        self.add_widget(CalibrationInput(service, size_hint=(None, 1), width=320))
+        self.add_widget(CalibrationInput(service, size_hint=(None, 1), width=dp(300)))
 
         service.subscribe(self._refresh_tool_buttons)
 

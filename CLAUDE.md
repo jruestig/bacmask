@@ -52,6 +52,7 @@ knowledge base. Start here:
 - [knowledge/027 — Toolbar Hotkey Labels](knowledge/027-toolbar-hotkey-labels.md)
 - [knowledge/028 — File Picker Double-Click to Open](knowledge/028-file-picker-double-click.md)
 - [knowledge/031 — Minimap Navigator + Keyboard Pan](knowledge/031-minimap-navigator.md)
+- [knowledge/033 — File Picker Breadcrumb Path Bar](knowledge/033-file-picker-breadcrumb-bar.md)
 
 ## Core Concepts (contracts)
 
@@ -130,7 +131,7 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
    - Full set of regions always visible — do not paginate or truncate.
 
 4. **File Operations:**
-   - **Load Image (`Ctrl+O`):** file picker, accepts common formats (PNG, JPG, TIFF, BMP). File upload only — no camera, no URL. Double-click on a file in the picker opens it ([knowledge/028](knowledge/028-file-picker-double-click.md)).
+   - **Load Image (`Ctrl+O`):** file picker, accepts common formats (PNG, JPG, TIFF, BMP). File upload only — no camera, no URL. Double-click on a file in the picker opens it ([knowledge/028](knowledge/028-file-picker-double-click.md)). A clickable **breadcrumb path bar** sits above the file list — every segment is a button that jumps the chooser to that directory ([knowledge/033](knowledge/033-file-picker-breadcrumb-bar.md)). Same bar on Save and Export pickers.
    - **Load Bundle:** `.bacmask` → restore image + polygons + scale. Rasterization happens in memory from polygons; no in-bundle mask to reconcile. Double-click opens, same as Load Image.
    - **Save (`Ctrl+S`):** writes only the `.bacmask` bundle.
    - **Export CSV (`Ctrl+E`):** writes only the areas CSV. Separate button from Save.
