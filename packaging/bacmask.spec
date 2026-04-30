@@ -24,15 +24,34 @@ VERSION_FILE = SPEC_DIR / "version_info.txt"
 hookspath = []
 runtime_hooks = []
 kivy_dep_bins = []
+kivy_hiddenimports = []
+kivy_excludes = []
 
 try:
     from kivy.tools.packaging.pyinstaller_hooks import (
         hookspath as kivy_hookspath,
         runtime_hooks as kivy_runtime_hooks,
+        get_deps_minimal,
     )
 
     hookspath += list(kivy_hookspath())
     runtime_hooks += list(kivy_runtime_hooks())
+
+    # Opt in to the Kivy subsystems BacMask actually uses; everything else
+    # (audio, video, camera, spelling) is dropped via the matching `excludes`
+    # the helper returns.
+    deps = get_deps_minimal(
+        video=False,
+        audio=False,
+        camera=False,
+        spelling=False,
+        image=True,
+        text=True,
+        window=True,
+        clipboard=True,
+    )
+    kivy_hiddenimports += deps.get("hiddenimports", [])
+    kivy_excludes += deps.get("excludes", [])
 except ImportError:
     pass
 
@@ -50,7 +69,7 @@ if sys.platform.startswith("win"):
     except ImportError:
         pass
 
-hiddenimports = []
+hiddenimports = list(kivy_hiddenimports)
 
 a = Analysis(
     [ENTRY],
@@ -70,14 +89,7 @@ a = Analysis(
         "tkinter",
         "PIL",
         "Pillow",
-        "kivy.core.audio",
-        "kivy.core.video",
-        "kivy.core.camera",
-        "kivy.core.spelling",
-        "kivy.core.clipboard.clipboard_dbus",
-        "kivy.core.clipboard.clipboard_xclip",
-        "kivy.core.clipboard.clipboard_xsel",
-        "kivy.network",
+        *kivy_excludes,
     ],
     noarchive=False,
     cipher=block_cipher,
