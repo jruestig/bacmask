@@ -1,9 +1,11 @@
-"""Kivy toolbar: Load / Save / Export / Undo / Redo / Delete / Lasso / Brush + calibration.
+"""Kivy toolbar: Data menu / Undo / Redo / Delete / Lasso / Brush + calibration.
 
-Every button's label includes its keyboard shortcut — see [027 — Toolbar
-Hotkey Labels](../../../knowledge/027-toolbar-hotkey-labels.md). Labels are
-generated via :func:`bacmask.ui.input.desktop_adapter.button_label` so the
-source of truth is the keybinding registry.
+Load, Save, and Export CSV are grouped under a single ``Data`` dropdown to
+keep the top row compact. Every action button's label still includes its
+keyboard shortcut — see
+[027 — Toolbar Hotkey Labels](../../../knowledge/027-toolbar-hotkey-labels.md).
+Labels are generated via :func:`bacmask.ui.input.desktop_adapter.button_label`
+so the source of truth is the keybinding registry.
 
 Calibration (mm/px + px/mm) sits at the right end of the toolbar so it's
 always reachable. Brush-specific controls live in a separate
@@ -19,6 +21,7 @@ from typing import Any
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.dropdown import DropDown
 from kivy.uix.togglebutton import ToggleButton
 
 from bacmask.services.mask_service import MaskService
@@ -26,6 +29,8 @@ from bacmask.ui.input.desktop_adapter import button_label
 from bacmask.ui.widgets.calibration_input import CalibrationInput
 
 TOOLBAR_HEIGHT = 40
+DATA_MENU_ITEM_HEIGHT = 40
+DATA_MENU_WIDTH = 200
 
 
 class Toolbar(BoxLayout):
@@ -44,24 +49,15 @@ class Toolbar(BoxLayout):
         super().__init__(**kwargs)
         self.service = service
 
-        self.add_widget(
-            Button(
-                text=button_label("load_image", "Load Image"),
-                on_release=lambda *_: on_load(),
+        self._data_menu = self._build_data_menu(on_load, on_save, on_export)
+        data_btn = Button(text="Data", size_hint_x=None, width=dp(DATA_MENU_WIDTH))
+        data_btn.bind(on_release=self._data_menu.open)
+        self._data_menu.bind(
+            on_select=lambda _instance, action: self._dispatch_data_action(
+                action, on_load, on_save, on_export
             )
         )
-        self.add_widget(
-            Button(
-                text=button_label("save_bundle", "Save"),
-                on_release=lambda *_: on_save(),
-            )
-        )
-        self.add_widget(
-            Button(
-                text=button_label("export_csv", "Export CSV"),
-                on_release=lambda *_: on_export(),
-            )
-        )
+        self.add_widget(data_btn)
         self.add_widget(
             Button(
                 text=button_label("undo", "Undo"),
@@ -106,6 +102,43 @@ class Toolbar(BoxLayout):
         self.add_widget(CalibrationInput(service, size_hint=(None, 1), width=dp(300)))
 
         service.subscribe(self._refresh_tool_buttons)
+
+    # ---- data menu ----------------------------------------------------------
+
+    def _build_data_menu(
+        self,
+        on_load: Callable[[], None],
+        on_save: Callable[[], None],
+        on_export: Callable[[], None],
+    ) -> DropDown:
+        menu = DropDown(auto_width=False, width=dp(DATA_MENU_WIDTH))
+        for action, text in (
+            ("load_image", "Load Image"),
+            ("save_bundle", "Save"),
+            ("export_csv", "Export CSV"),
+        ):
+            item = Button(
+                text=button_label(action, text),
+                size_hint_y=None,
+                height=dp(DATA_MENU_ITEM_HEIGHT),
+            )
+            item.bind(on_release=lambda btn, a=action: menu.select(a))
+            menu.add_widget(item)
+        return menu
+
+    @staticmethod
+    def _dispatch_data_action(
+        action: str,
+        on_load: Callable[[], None],
+        on_save: Callable[[], None],
+        on_export: Callable[[], None],
+    ) -> None:
+        if action == "load_image":
+            on_load()
+        elif action == "save_bundle":
+            on_save()
+        elif action == "export_csv":
+            on_export()
 
     # ---- delete -------------------------------------------------------------
 
