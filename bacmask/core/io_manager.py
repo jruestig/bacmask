@@ -47,7 +47,10 @@ def load_image(path: Path | str) -> np.ndarray:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(p)
-    img = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+    # Read via np.fromfile + imdecode so Windows paths with non-ASCII
+    # characters (umlauts, accents) work — cv2.imread uses ANSI APIs.
+    buf = np.fromfile(str(p), dtype=np.uint8)
+    img = cv2.imdecode(buf, cv2.IMREAD_UNCHANGED)
     if img is None:
         raise ValueError(f"could not decode image: {p}")
     return img
