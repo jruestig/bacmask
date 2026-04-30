@@ -34,6 +34,10 @@ jobs:
             pyinstaller-${{ runner.os }}-
 
       - name: Build onefolder dist with PyInstaller
+        env:
+          KIVY_GL_BACKEND: mock
+          KIVY_NO_CONSOLELOG: "1"
+          KIVY_NO_ARGS: "1"
         run: uv run pyinstaller packaging\bacmask.spec --noconfirm
 
       - name: Install Inno Setup 6
