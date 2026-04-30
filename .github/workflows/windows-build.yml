@@ -26,7 +26,7 @@ jobs:
       - name: Install runtime + build deps
         run: |
           uv sync --no-dev
-          uv pip install pyinstaller "kivy_deps.sdl2" "kivy_deps.glew"
+          uv pip install pyinstaller "kivy_deps.sdl2" "kivy_deps.glew" pywin32
 
       - name: Cache PyInstaller build dir
         uses: actions/cache@v4

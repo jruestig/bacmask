@@ -71,6 +71,12 @@ if sys.platform.startswith("win"):
 
 hiddenimports = list(kivy_hiddenimports)
 
+# kivy.uix.filechooser does a deferred `import win32timezone` inside
+# is_hidden() the first time it lists a directory on Windows. PyInstaller
+# doesn't see it because it's inside a function body, so add it explicitly.
+if sys.platform.startswith("win"):
+    hiddenimports += ["win32timezone"]
+
 a = Analysis(
     [ENTRY],
     pathex=[str(REPO_ROOT)],
