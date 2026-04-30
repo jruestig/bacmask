@@ -96,6 +96,15 @@ class Toolbar(BoxLayout):
         self._brush_btn.bind(on_release=lambda *_: self._on_brush_button())
         self.add_widget(self._brush_btn)
 
+        self._line_btn = ToggleButton(
+            text=button_label("select_line", "Line"),
+            group="bacmask_tool",
+            allow_no_selection=False,
+            state="down" if service.state.active_tool == "line" else "normal",
+        )
+        self._line_btn.bind(on_release=lambda *_: self._on_line_button())
+        self.add_widget(self._line_btn)
+
         # Calibration sits right next to the Brush button. ``size_hint_y=1``
         # overrides the widget's standalone default so the inputs fill the
         # toolbar's full height.
@@ -143,6 +152,16 @@ class Toolbar(BoxLayout):
     # ---- delete -------------------------------------------------------------
 
     def _delete(self) -> None:
+        # Mirrors the Del/Backspace key handler in ``app._run_action`` — line
+        # selection wins because it requires an explicit results-panel click,
+        # while a region selection can linger from a prior canvas tap.
+        line_id = self.service.state.selected_line_id
+        if line_id is not None:
+            try:
+                self.service.delete_line(line_id)
+            except KeyError:
+                pass
+            return
         sid = self.service.state.selected_region_id
         if sid is None:
             return
@@ -159,17 +178,18 @@ class Toolbar(BoxLayout):
     def _on_brush_button(self) -> None:
         self.service.set_active_tool("brush")
 
+    def _on_line_button(self) -> None:
+        self.service.set_active_tool("line")
+
     # ---- subscriber ---------------------------------------------------------
 
     def _refresh_tool_buttons(self) -> None:
         active = self.service.state.active_tool
-        if active == "lasso":
-            if self._lasso_btn.state != "down":
-                self._lasso_btn.state = "down"
-            if self._brush_btn.state != "normal":
-                self._brush_btn.state = "normal"
-        else:
-            if self._brush_btn.state != "down":
-                self._brush_btn.state = "down"
-            if self._lasso_btn.state != "normal":
-                self._lasso_btn.state = "normal"
+        for tool, btn in (
+            ("lasso", self._lasso_btn),
+            ("brush", self._brush_btn),
+            ("line", self._line_btn),
+        ):
+            wanted = "down" if active == tool else "normal"
+            if btn.state != wanted:
+                btn.state = wanted

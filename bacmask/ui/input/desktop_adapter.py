@@ -32,6 +32,7 @@ DEFAULT_KEYBINDINGS: dict[tuple[str, frozenset[str]], str] = {
     ("o", frozenset({"ctrl"})): "load_image",
     ("l", frozenset()): "select_lasso",
     ("b", frozenset()): "select_brush",
+    ("m", frozenset()): "select_line",
     ("tab", frozenset()): "toggle_brush_mode",
     ("left", frozenset()): "pan_left",
     ("right", frozenset()): "pan_right",

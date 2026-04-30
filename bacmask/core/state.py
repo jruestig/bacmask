@@ -10,7 +10,7 @@ import numpy as np
 
 from bacmask.config import defaults
 
-Tool = Literal["lasso", "brush"]
+Tool = Literal["lasso", "brush", "line"]
 
 
 @dataclass
@@ -63,11 +63,22 @@ class SessionState:
     brush_default_mode: Literal["add", "subtract", "create"] = "add"
     # Per-stroke buffer. None when no brush stroke is in flight.
     active_brush_stroke: BrushStroke | None = None
+    # Measurement lines — per-session only, not persisted in the bundle and not
+    # exported to CSV. Shape: ``{line_id: {"name": str, "p1": (x, y), "p2": (x, y)}}``.
+    lines: dict[int, dict[str, Any]] = field(default_factory=dict)
+    next_line_id: int = 1
+    # In-progress line preview during drag — ``{"p1": (x, y), "p2": (x, y)}`` or
+    # ``None`` when no line is being drawn.
+    active_line: dict[str, tuple[int, int]] | None = None
+    selected_line_id: int | None = None
     dirty: bool = False
     # Monotonic counter bumped whenever `regions` changes. Canvas watches this
     # to gate the (expensive) overlay-texture rebuild so selection / mode /
     # calibration notifies don't trigger a full repaint.
     regions_version: int = 0
+    # Counter bumped whenever ``lines`` changes (add / delete). The results
+    # table uses this to skip rebuilding line rows on selection-only notifies.
+    lines_version: int = 0
 
     def set_image(self, image: np.ndarray, path: Path) -> None:
         self.image = image
@@ -82,5 +93,10 @@ class SessionState:
         self.active_lasso = None
         self.active_brush_stroke = None
         self.selected_region_id = None
+        self.lines = {}
+        self.next_line_id = 1
+        self.active_line = None
+        self.selected_line_id = None
         self.dirty = False
         self.regions_version += 1
+        self.lines_version += 1

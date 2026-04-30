@@ -45,6 +45,10 @@ LASSO_PREVIEW_COLOR = (1.0, 1.0, 0.0, 1.0)  # yellow
 BRUSH_ADD_COLOR = (0.2, 1.0, 0.2)  # green RGB (alpha applied per use)
 BRUSH_SUBTRACT_COLOR = (1.0, 0.2, 0.2)  # red RGB
 BRUSH_CREATE_COLOR = (0.3, 0.6, 1.0)  # blue RGB (new region preview)
+LINE_COLOR = (1.0, 0.6, 0.0, 1.0)  # orange — committed measurement line
+LINE_PREVIEW_COLOR = (1.0, 0.85, 0.0, 1.0)  # amber — in-progress line preview
+LINE_SELECTED_COLOR = SELECTED_OUTLINE_COLOR
+LINE_WIDTH = 1.4
 
 
 def _brush_color_for(mode: str) -> tuple[float, float, float]:
@@ -376,6 +380,27 @@ class ImageCanvas(Widget):
                     Color(*SELECTED_OUTLINE_COLOR)
                     Line(points=pts, width=1.5, close=True)
 
+            # Committed measurement lines
+            lines = self.service.state.lines
+            if lines:
+                selected_line = self.service.state.selected_line_id
+                for lid, meta in sorted(lines.items()):
+                    pts = self._image_points_to_widget([meta["p1"], meta["p2"]], (img_w, img_h))
+                    if not pts:
+                        continue
+                    Color(*(LINE_SELECTED_COLOR if lid == selected_line else LINE_COLOR))
+                    Line(points=pts, width=LINE_WIDTH)
+
+            # In-progress line preview
+            active_line = self.service.state.active_line
+            if active_line is not None:
+                pts = self._image_points_to_widget(
+                    [active_line["p1"], active_line["p2"]], (img_w, img_h)
+                )
+                if pts:
+                    Color(*LINE_PREVIEW_COLOR)
+                    Line(points=pts, width=LINE_WIDTH)
+
             # In-progress lasso polyline preview
             lasso = self.service.state.active_lasso
             if lasso is not None and len(lasso) >= 2:
@@ -682,6 +707,8 @@ class ImageCanvas(Widget):
             tool = self.service.state.active_tool
             if tool == "brush":
                 self._on_brush_pointer_down(xy)
+            elif tool == "line":
+                self._on_line_pointer_down(xy)
             else:
                 self._on_lasso_pointer_down(xy)
         elif isinstance(event, PointerMove):
@@ -697,11 +724,14 @@ class ImageCanvas(Widget):
                 self.service.add_brush_sample(xy)
             elif self.service.state.active_lasso is not None:
                 self.service.add_lasso_point(xy)
+            elif self.service.state.active_line is not None:
+                self.service.update_line(xy)
             else:
                 # Just refresh the cursor circle position.
                 self._repaint()
         elif isinstance(event, PointerUp):
-            self._on_pointer_up()
+            xy = self._widget_pos_to_image(event.pos, (img_h, img_w))
+            self._on_pointer_up(xy)
         elif isinstance(event, Zoom):
             self._apply_zoom(event.center, event.delta, (img_w, img_h))
         elif isinstance(event, Pan):
@@ -729,7 +759,13 @@ class ImageCanvas(Widget):
             return
         self._brush_preview_pts = [xy]
 
-    def _on_pointer_up(self) -> None:
+    def _on_line_pointer_down(self, xy: tuple[int, int]) -> None:
+        """Line tool: press-down anchors p1; drag updates p2; release commits."""
+        self.service.clear_selection()
+        self.service.clear_line_selection()
+        self.service.begin_line(xy)
+
+    def _on_pointer_up(self, xy: tuple[int, int] | None) -> None:
         svc = self.service
         if svc.state.active_brush_stroke is not None:
             svc.end_brush_stroke()
@@ -737,6 +773,12 @@ class ImageCanvas(Widget):
             return
         if svc.state.active_lasso is not None:
             svc.close_lasso()
+            return
+        if svc.state.active_line is not None:
+            # Fall back to the last known endpoint if the release landed
+            # outside the image — discard happens when both endpoints match.
+            end = xy if xy is not None else svc.state.active_line["p2"]
+            svc.commit_line(end)
 
     # ---- view transform -----------------------------------------------------
 
@@ -841,6 +883,8 @@ class ImageCanvas(Widget):
             if svc.state.active_brush_stroke is not None:
                 svc.cancel_brush_stroke()
                 self._brush_preview_pts = []
+            elif svc.state.active_line is not None:
+                svc.cancel_line()
             else:
                 svc.cancel_lasso()
         elif name == "undo":
@@ -848,6 +892,17 @@ class ImageCanvas(Widget):
         elif name == "redo":
             svc.redo()
         elif name == "delete_region":
+            # Delete acts on whichever object is selected. Lines are checked
+            # first because line selection requires an explicit click in the
+            # results panel, while a region selection can linger from a prior
+            # canvas tap.
+            line_id = svc.state.selected_line_id
+            if line_id is not None:
+                try:
+                    svc.delete_line(line_id)
+                except KeyError:
+                    pass
+                return
             sid = svc.state.selected_region_id
             if sid is not None:
                 try:
@@ -858,6 +913,8 @@ class ImageCanvas(Widget):
             svc.set_active_tool("lasso")
         elif name == "select_brush":
             svc.set_active_tool("brush")
+        elif name == "select_line":
+            svc.set_active_tool("line")
         elif name == "toggle_brush_mode":
             svc.toggle_brush_default_mode()
         elif name in ("pan_left", "pan_right", "pan_up", "pan_down"):

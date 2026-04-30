@@ -421,6 +421,92 @@ def test_set_active_tool_rejects_unknown():
         svc.set_active_tool("foo")  # type: ignore[arg-type]
 
 
+def test_set_active_tool_accepts_line():
+    svc = MaskService()
+    svc.set_active_tool("line")
+    assert svc.state.active_tool == "line"
+
+
+# ---- line measurement tool ----
+
+
+def test_commit_line_creates_measurement(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.begin_line((10, 10))
+    svc.update_line((20, 10))
+    line_id = svc.commit_line((20, 10))
+    assert line_id == 1
+    assert svc.state.lines == {1: {"name": "line_1", "p1": (10, 10), "p2": (20, 10)}}
+    assert svc.state.active_line is None
+    assert svc.state.next_line_id == 2
+
+
+def test_commit_line_zero_length_discards(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.begin_line((10, 10))
+    assert svc.commit_line((10, 10)) is None
+    assert svc.state.lines == {}
+    assert svc.state.next_line_id == 1
+
+
+def test_cancel_line_clears_buffer(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.begin_line((10, 10))
+    svc.update_line((20, 20))
+    svc.cancel_line()
+    assert svc.state.active_line is None
+    assert svc.state.lines == {}
+
+
+def test_compute_line_rows_pixel_length(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.begin_line((0, 0))
+    svc.commit_line((3, 4))  # 3-4-5 triangle
+    rows = svc.compute_line_rows()
+    assert len(rows) == 1
+    assert rows[0]["line_id"] == 1
+    assert rows[0]["name"] == "line_1"
+    assert rows[0]["length_px"] == pytest.approx(5.0)
+
+
+def test_delete_line_removes_and_clears_selection(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.begin_line((0, 0))
+    line_id = svc.commit_line((10, 0))
+    svc.select_line(line_id)
+    svc.delete_line(line_id)
+    assert svc.state.lines == {}
+    assert svc.state.selected_line_id is None
+
+
+def test_line_id_not_reused_after_delete(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.begin_line((0, 0))
+    first = svc.commit_line((10, 0))
+    svc.delete_line(first)
+    svc.begin_line((0, 0))
+    second = svc.commit_line((20, 0))
+    assert second == 2
+
+
+def test_load_image_clears_lines(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path, "a.png"))
+    svc.begin_line((0, 0))
+    svc.commit_line((10, 10))
+    assert svc.state.lines
+    svc.load_image(_write_image(tmp_path, "b.png"))
+    assert svc.state.lines == {}
+    assert svc.state.next_line_id == 1
+    assert svc.state.selected_line_id is None
+
+
 def test_set_brush_radius_clamps_and_validates():
     svc = MaskService()
     svc.set_brush_radius(15)

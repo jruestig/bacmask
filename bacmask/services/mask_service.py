@@ -14,6 +14,7 @@ import logging
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -129,8 +130,13 @@ class MaskService:
         self.state.active_lasso = None
         self.state.active_brush_stroke = None
         self.state.selected_region_id = None
+        self.state.lines = {}
+        self.state.next_line_id = 1
+        self.state.active_line = None
+        self.state.selected_line_id = None
         self.state.dirty = False
         self.state.regions_version += 1
+        self.state.lines_version += 1
         self.history.clear()
         self._active_lasso = []
         self._notify()
@@ -142,7 +148,7 @@ class MaskService:
         per knowledge/026, a started stroke completes on its own terms; the
         switch lands on the next press-down.
         """
-        if tool not in ("lasso", "brush"):
+        if tool not in ("lasso", "brush", "line"):
             raise ValueError(f"unknown tool: {tool!r}")
         if self.state.active_tool == tool:
             return
@@ -536,6 +542,98 @@ class MaskService:
         self.history.push(cmd, self.state)
         self._notify()
         return "created"
+
+    # ---- line measurement tool ---------------------------------------------
+    # Per-session measurement lines for hand-calibrating mm/px against a known
+    # scale bar. Not persisted in the bundle; not exported to CSV; not part of
+    # the undo/redo stack. State-only — clearing lines is a manual operation.
+
+    def begin_line(self, pos: tuple[int, int]) -> None:
+        ix, iy = int(pos[0]), int(pos[1])
+        self.state.active_line = {"p1": (ix, iy), "p2": (ix, iy)}
+        self._notify()
+
+    def update_line(self, pos: tuple[int, int]) -> None:
+        if self.state.active_line is None:
+            return
+        ix, iy = int(pos[0]), int(pos[1])
+        self.state.active_line["p2"] = (ix, iy)
+        self._notify()
+
+    def cancel_line(self) -> None:
+        if self.state.active_line is None:
+            return
+        self.state.active_line = None
+        self._notify()
+
+    def commit_line(self, pos: tuple[int, int]) -> int | None:
+        """Commit the in-progress line. Returns line id or None if discarded.
+
+        Zero-length lines (start == end, e.g. a pure click with no drag) are
+        discarded silently — same spirit as the lasso's zero-area discard.
+        """
+        if self.state.active_line is None:
+            return None
+        p1 = self.state.active_line["p1"]
+        ix, iy = int(pos[0]), int(pos[1])
+        p2 = (ix, iy)
+        self.state.active_line = None
+        if p1 == p2:
+            self._notify()
+            return None
+        line_id = self.state.next_line_id
+        self.state.lines[line_id] = {
+            "name": f"line_{line_id}",
+            "p1": p1,
+            "p2": p2,
+        }
+        self.state.next_line_id += 1
+        self.state.lines_version += 1
+        self._notify()
+        return line_id
+
+    def delete_line(self, line_id: int) -> None:
+        if line_id not in self.state.lines:
+            raise KeyError(f"line {line_id} does not exist")
+        del self.state.lines[line_id]
+        if self.state.selected_line_id == line_id:
+            self.state.selected_line_id = None
+        self.state.lines_version += 1
+        self._notify()
+
+    def select_line(self, line_id: int) -> None:
+        if line_id not in self.state.lines:
+            raise KeyError(f"line {line_id} does not exist")
+        if self.state.selected_line_id != line_id:
+            self.state.selected_line_id = line_id
+            self._notify()
+
+    def clear_line_selection(self) -> None:
+        if self.state.selected_line_id is not None:
+            self.state.selected_line_id = None
+            self._notify()
+
+    def compute_line_rows(self) -> list[dict[str, Any]]:
+        """Per-line rows for the results panel.
+
+        Length is the Euclidean distance between endpoints in image pixels.
+        Returned in ascending ``line_id`` order.
+        """
+        rows: list[dict[str, Any]] = []
+        for line_id, meta in sorted(self.state.lines.items()):
+            p1 = meta["p1"]
+            p2 = meta["p2"]
+            dx = float(p2[0] - p1[0])
+            dy = float(p2[1] - p1[1])
+            length_px = (dx * dx + dy * dy) ** 0.5
+            rows.append(
+                {
+                    "line_id": line_id,
+                    "name": meta["name"],
+                    "length_px": length_px,
+                }
+            )
+        return rows
 
     # ---- delete -------------------------------------------------------------
 

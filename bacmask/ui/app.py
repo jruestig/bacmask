@@ -84,6 +84,8 @@ class BacMaskApp(App):
         elif action == "cancel_stroke":
             if svc.state.active_brush_stroke is not None:
                 svc.cancel_brush_stroke()
+            elif svc.state.active_line is not None:
+                svc.cancel_line()
             else:
                 svc.cancel_lasso()
         elif action == "undo":
@@ -91,6 +93,17 @@ class BacMaskApp(App):
         elif action == "redo":
             svc.redo()
         elif action == "delete_region":
+            # Delete acts on whichever object is selected. A line selection
+            # only happens via an explicit click in the results panel, so it
+            # takes priority over a region selection that may linger from a
+            # prior canvas tap.
+            line_id = svc.state.selected_line_id
+            if line_id is not None:
+                try:
+                    svc.delete_line(line_id)
+                except KeyError:
+                    pass
+                return True
             sid = svc.state.selected_region_id
             if sid is not None:
                 try:
@@ -105,6 +118,8 @@ class BacMaskApp(App):
             svc.set_active_tool("lasso")
         elif action == "select_brush":
             svc.set_active_tool("brush")
+        elif action == "select_line":
+            svc.set_active_tool("line")
         elif action == "toggle_brush_mode":
             svc.toggle_brush_default_mode()
         elif action == "load_image":
