@@ -25,6 +25,14 @@ jobs:
           uv sync --no-dev
           uv pip install pyinstaller "kivy_deps.sdl2" "kivy_deps.glew"
 
+      - name: Cache PyInstaller build dir
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: pyinstaller-${{ runner.os }}-${{ hashFiles('packaging/bacmask.spec', 'uv.lock', 'pyproject.toml') }}
+          restore-keys: |
+            pyinstaller-${{ runner.os }}-
+
       - name: Build onefolder dist with PyInstaller
         run: uv run pyinstaller packaging\bacmask.spec --noconfirm
 

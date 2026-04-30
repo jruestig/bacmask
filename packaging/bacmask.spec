@@ -10,6 +10,8 @@
 from pathlib import Path
 import sys
 
+sys.setrecursionlimit(5000)
+
 block_cipher = None
 
 SPEC_DIR = Path(SPECPATH).resolve()
