@@ -1,12 +1,12 @@
 # BacMask Knowledge Base
 
-Zettelkasten-style notes for ideas, decisions, and design rationale. Conversation retainment between sessions.
+Zettelkasten-style notes for ideas, decisions, and design rationale. Preserves conversation context between sessions.
 
-> **Session handoff:** [`_status.md`](_status.md) — what's in flight, what's next, what just landed. Update at the end of each session. Not a zettel — a rolling snapshot.
+> **Session handoff:** [`_status.md`](_status.md) — in flight, next up, recently landed. Update at end of each session. Not a zettel — a rolling snapshot.
 
 ## Conventions
 
-- **One idea per note.** If a note sprouts a second concept, split it.
+- **One idea per note.** Split if a note sprouts a second concept.
 - **ID + slug filename:** `NNN-kebab-case-slug.md` (zero-padded 3 digits; branching IDs `001a`, `001a1` allowed for child thoughts).
 - **Frontmatter** on every note:
   ```yaml
@@ -21,8 +21,8 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Conversatio
   ```
 - **Linking:** use relative markdown links `[Separation of Concerns](001-separation-of-concerns.md)`. Cross-reference liberally — links are the value.
 - **Status lifecycle:** `draft` → `proposed` → `accepted` → `superseded` (link to the superseding note).
-- **Atomic & self-contained:** a note should make sense without reading the whole base, but should link out for depth.
-- **No status duplication:** if a note becomes obsolete, mark `status: superseded` and link forward — do not delete.
+- **Atomic & self-contained:** a note should stand alone but link out for depth.
+- **No status duplication:** obsolete notes get `status: superseded` and a forward link — do not delete.
 
 ## Index
 
@@ -91,4 +91,4 @@ Retired decisions kept for reasoning trails and decision-record context. Do **no
 1. Pick next ID (or branch under a parent, e.g. `003a` for a sub-thought of 003).
 2. Create `NNN-slug.md` with frontmatter.
 3. Add link under appropriate Index section above.
-4. Add backlinks: in each related note, append this note to its `related:` list and/or "Related" section.
+4. Add backlinks: append this note to each related note's `related:` list and/or "Related" section.

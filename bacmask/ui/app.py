@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,9 @@ from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
+from kivy.uix.textinput import TextInput
 
-from bacmask.config import defaults
+from bacmask.core.state import SessionState
 from bacmask.services.mask_service import MaskService
 from bacmask.ui.input.desktop_adapter import keybinding_for
 from bacmask.ui.screens.main_screen import MainScreen
@@ -25,6 +27,9 @@ class BacMaskApp(App):
     def __init__(self, initial_path: Path | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._initial_path = initial_path
+        self._last_save_dir: Path | None = None
+        self._last_export_dir: Path | None = None
+        self._open_modal_count: int = 0
 
     def build(self) -> MainScreen:
         self.service = MaskService()
@@ -58,6 +63,10 @@ class BacMaskApp(App):
         codepoint: str | None,
         modifiers: list[str],
     ) -> bool:
+        # Let any open modal (Save As, Load, etc.) own keyboard input — we
+        # don't want global shortcuts to fire while a dialog is up.
+        if self._open_modal_count > 0:
+            return False
         # Let the focused TextInput own its keys (backspace, delete, ctrl+z, etc.).
         if _text_input_focused(self.screen):
             return False
@@ -109,6 +118,68 @@ class BacMaskApp(App):
 
     # ---- load / save dialogs ------------------------------------------------
 
+    def _open_new_folder_dialog(self, parent_dir: Path, chooser: FileChooserListView) -> None:
+        """Prompt for a folder name, create it under ``parent_dir``, navigate into it."""
+        box = BoxLayout(orientation="vertical", spacing=6, padding=6)
+        box.add_widget(
+            Label(
+                text=f"Create folder in:\n{parent_dir}",
+                size_hint_y=None,
+                height=48,
+            )
+        )
+        name_input = TextInput(
+            multiline=False,
+            write_tab=False,
+            size_hint_y=None,
+            height=34,
+        )
+        box.add_widget(name_input)
+
+        btn_box = BoxLayout(size_hint_y=None, height=34, spacing=4)
+        ok = Button(text="Create")
+        cancel = Button(text="Cancel")
+        btn_box.add_widget(ok)
+        btn_box.add_widget(cancel)
+        box.add_widget(btn_box)
+
+        popup = Popup(title="New Folder", content=box, size_hint=(0.5, 0.4))
+        self._track_modal(popup)
+        popup.bind(on_open=lambda *_: setattr(name_input, "focus", True))
+
+        def do_create(*_: Any) -> None:
+            name = name_input.text.strip()
+            if not name or "/" in name or "\\" in name:
+                _popup("Invalid folder name.", title="New Folder")
+                return
+            new_dir = parent_dir / name
+            try:
+                new_dir.mkdir(parents=False, exist_ok=False)
+            except FileExistsError:
+                _popup(f"Already exists:\n{new_dir}", title="New Folder")
+                return
+            except Exception as e:
+                _popup(f"Failed: {e}", title="New Folder")
+                return
+            popup.dismiss()
+            chooser.path = str(new_dir)
+
+        ok.bind(on_release=do_create)
+        cancel.bind(on_release=lambda *_: popup.dismiss())
+        name_input.bind(on_text_validate=do_create)
+        popup.open()
+
+    def _track_modal(self, popup: Popup) -> None:
+        """Suppress global key shortcuts while ``popup`` is open."""
+
+        def _on_open(*_: Any) -> None:
+            self._open_modal_count += 1
+
+        def _on_dismiss(*_: Any) -> None:
+            self._open_modal_count = max(0, self._open_modal_count - 1)
+
+        popup.bind(on_open=_on_open, on_dismiss=_on_dismiss)
+
     def _open_load_dialog(self) -> None:
         start_path = str(Path.cwd())
         chooser = FileChooserListView(
@@ -138,6 +209,7 @@ class BacMaskApp(App):
         box.add_widget(btn_box)
 
         popup = Popup(title="Load Image / Bundle", content=box, size_hint=(0.9, 0.9))
+        self._track_modal(popup)
 
         def do_load(*_: Any) -> None:
             if not chooser.selection:
@@ -172,14 +244,25 @@ class BacMaskApp(App):
             return
 
         stem = Path(state.image_filename).stem
-        defaults.BUNDLES_DIR.mkdir(parents=True, exist_ok=True)
-        bundle_path = defaults.BUNDLES_DIR / f"{stem}.bacmask"
+        start_dir = self._last_save_dir or _image_dir(state) or Path.cwd()
 
-        try:
-            self.service.save_bundle(bundle_path)
-            _popup(f"Saved:\n{bundle_path}", title="Saved")
-        except Exception as e:
-            _popup(f"Save failed: {e}", title="Error")
+        def do_save(out_path: Path) -> None:
+            if out_path.suffix.lower() != ".bacmask":
+                out_path = out_path.with_suffix(".bacmask")
+            try:
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                self.service.save_bundle(out_path)
+                self._last_save_dir = out_path.parent
+                _popup(f"Saved:\n{out_path}", title="Saved")
+            except Exception as e:
+                _popup(f"Save failed: {e}", title="Error")
+
+        self._open_save_as_dialog(
+            title="Save Bundle As",
+            start_dir=start_dir,
+            default_filename=f"{stem}.bacmask",
+            on_confirm=do_save,
+        )
 
     def _export_csv(self) -> None:
         state = self.service.state
@@ -188,14 +271,91 @@ class BacMaskApp(App):
             return
 
         stem = Path(state.image_filename).stem
-        defaults.AREAS_DIR.mkdir(parents=True, exist_ok=True)
-        csv_path = defaults.AREAS_DIR / f"{stem}_areas.csv"
+        start_dir = self._last_export_dir or _image_dir(state) or Path.cwd()
 
-        try:
-            self.service.export_csv(csv_path)
-            _popup(f"Exported:\n{csv_path}", title="Exported")
-        except Exception as e:
-            _popup(f"Export failed: {e}", title="Error")
+        def do_export(out_path: Path) -> None:
+            if out_path.suffix.lower() != ".csv":
+                out_path = out_path.with_suffix(".csv")
+            try:
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                self.service.export_csv(out_path)
+                self._last_export_dir = out_path.parent
+                _popup(f"Exported:\n{out_path}", title="Exported")
+            except Exception as e:
+                _popup(f"Export failed: {e}", title="Error")
+
+        self._open_save_as_dialog(
+            title="Export CSV As",
+            start_dir=start_dir,
+            default_filename=f"{stem}_areas.csv",
+            on_confirm=do_export,
+        )
+
+    def _open_save_as_dialog(
+        self,
+        title: str,
+        start_dir: Path,
+        default_filename: str,
+        on_confirm: Callable[[Path], None],
+    ) -> None:
+        if not start_dir.is_dir():
+            start_dir = Path.cwd()
+        chooser = FileChooserListView(path=str(start_dir), dirselect=False)
+
+        box = BoxLayout(orientation="vertical")
+        box.add_widget(chooser)
+
+        name_row = BoxLayout(size_hint_y=None, height=34, spacing=4)
+        name_row.add_widget(Label(text="Filename:", size_hint_x=None, width=80))
+        name_input = TextInput(
+            text=default_filename,
+            multiline=False,
+            write_tab=False,
+        )
+        name_row.add_widget(name_input)
+        box.add_widget(name_row)
+
+        btn_box = BoxLayout(size_hint_y=None, height=34, spacing=4)
+        new_folder = Button(text="New Folder")
+        ok = Button(text="Save")
+        cancel = Button(text="Cancel")
+        btn_box.add_widget(new_folder)
+        btn_box.add_widget(ok)
+        btn_box.add_widget(cancel)
+        box.add_widget(btn_box)
+
+        popup = Popup(title=title, content=box, size_hint=(0.9, 0.9))
+        self._track_modal(popup)
+
+        def open_new_folder(*_: Any) -> None:
+            self._open_new_folder_dialog(Path(chooser.path), chooser)
+
+        new_folder.bind(on_release=open_new_folder)
+
+        def _focus_name(*_: Any) -> None:
+            name_input.focus = True
+
+        popup.bind(on_open=_focus_name)
+
+        def _sync_name_from_selection(*_: Any) -> None:
+            if chooser.selection:
+                sel = Path(chooser.selection[0])
+                if sel.is_file():
+                    name_input.text = sel.name
+
+        chooser.bind(selection=_sync_name_from_selection)
+
+        def do_confirm(*_: Any) -> None:
+            name = name_input.text.strip()
+            if not name:
+                return
+            out_path = Path(chooser.path) / name
+            popup.dismiss()
+            on_confirm(out_path)
+
+        ok.bind(on_release=do_confirm)
+        cancel.bind(on_release=lambda *_: popup.dismiss())
+        popup.open()
 
 
 # ---- helpers ---------------------------------------------------------------
@@ -225,7 +385,6 @@ def _kivy_key_name(key: int) -> str | None:
 
 def _text_input_focused(root: Any) -> bool:
     """True if any TextInput descendant of ``root`` currently has focus."""
-    from kivy.uix.textinput import TextInput
 
     def walk(w: Any) -> bool:
         if isinstance(w, TextInput) and w.focus:
@@ -236,6 +395,15 @@ def _text_input_focused(root: Any) -> bool:
         return False
 
     return walk(root)
+
+
+def _image_dir(state: SessionState) -> Path | None:
+    """Directory of the loaded image, if any — used as the default Save-As dir."""
+    p = state.image_path
+    if p is None:
+        return None
+    parent = Path(p).parent
+    return parent if parent.is_dir() else None
 
 
 def _popup(text: str, title: str = "BacMask") -> None:

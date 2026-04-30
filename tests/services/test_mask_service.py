@@ -931,3 +931,115 @@ def test_brush_add_reads_polygon_not_mask(tmp_path):
     assert committed_mask[12, 12], "original target interior lost → commit dropped real polygon"
     # Pixel painted by the stroke past the old right edge (x=22, y=15).
     assert committed_mask[15, 22], "stroke extension missing from committed polygon"
+
+
+# ---- bundle round-trip: brush-edited polygons (knowledge/030 regression) ----
+
+
+def test_brush_edited_regions_survive_bundle_round_trip(tmp_path):
+    """Polygons mutated by every brush commit path round-trip through save →
+    load with vertex lists equal element-for-element.
+
+    Polygons are canonical (knowledge/030); commands snapshot vertex lists
+    only (wave-1B). The bundle stores no raster mask, so the loaded service
+    must be able to re-derive every region from the polygons alone. This
+    test composes a region from lasso + brush-add + brush-subtract and a
+    second region from brush-create — each commit path writes a polygon
+    through ``contour_vertices`` — then asserts the regions dict is exactly
+    equal across the round-trip.
+    """
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+
+    _draw_lasso(svc, _square(10, 10, 12))  # region 1
+    svc.set_brush_radius(2)
+    assert _run_brush(svc, [(20, 16), (24, 16), (28, 16)], mode="add") == "added"
+    assert _run_brush(svc, [(13, 18), (16, 18)], mode="subtract") == "subtracted"
+
+    svc.set_brush_radius(3)
+    assert _run_brush(svc, [(35, 35), (40, 35), (40, 40)], mode="create") == "created"
+    assert set(svc.state.regions) == {1, 2}
+
+    svc.set_calibration(0.005)
+
+    pre_regions = {
+        k: {"name": v["name"], "vertices": [list(p) for p in v["vertices"]]}
+        for k, v in svc.state.regions.items()
+    }
+    pre_next_id = svc.state.next_label_id
+    pre_label_map = svc.state.label_map.copy()
+
+    bundle_p = tmp_path / "rt.bacmask"
+    svc.save_bundle(bundle_p)
+
+    svc2 = MaskService()
+    svc2.load_bundle(bundle_p)
+
+    assert svc2.state.regions == pre_regions
+    assert svc2.state.next_label_id == pre_next_id
+    assert svc2.state.scale_mm_per_px == 0.005
+    # Display cache is derived from polygons; pin it so a silent JSON
+    # int-coercion bug in vertices would still surface here.
+    assert np.array_equal(svc2.state.label_map, pre_label_map)
+
+
+def test_save_load_save_meta_is_stable_modulo_updated_at(tmp_path):
+    """Save → load → save produces the same ``meta.json`` modulo
+    ``updated_at`` (which the writer rewrites by design — knowledge/015).
+
+    Pins determinism for the polygon section across a full round-trip:
+    nothing in the loaded state should silently change vertex order, type,
+    or value before being written back.
+    """
+    import json
+    import zipfile
+
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 10))
+    svc.set_brush_radius(2)
+    assert _run_brush(svc, [(18, 15), (22, 15), (25, 15)], mode="add") == "added"
+    assert _run_brush(svc, [(13, 18), (15, 18)], mode="subtract") == "subtracted"
+    svc.set_calibration(0.005)
+
+    a = tmp_path / "a.bacmask"
+    b = tmp_path / "b.bacmask"
+    svc.save_bundle(a)
+
+    svc2 = MaskService()
+    svc2.load_bundle(a)
+    svc2.save_bundle(b)
+
+    def _meta(p):
+        with zipfile.ZipFile(p, "r") as zf:
+            m = json.loads(zf.read("meta.json"))
+        m.pop("updated_at", None)
+        return m
+
+    assert _meta(a) == _meta(b)
+
+
+def test_brush_edit_round_trip_survives_undo_redo(tmp_path):
+    """Undo/redo across a brush stroke must restore the polygon
+    bit-identically — and the round-tripped polygon (after redo) must save
+    + load back to the same vertex list. Catches any drift in the command's
+    snapshot path (wave-1B) where an undo→redo could otherwise re-rasterize
+    and round vertex coordinates.
+    """
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square(10, 10, 12))
+    svc.set_brush_radius(2)
+    assert _run_brush(svc, [(20, 16), (24, 16), (28, 16)], mode="add") == "added"
+
+    after_add = [list(p) for p in svc.state.regions[1]["vertices"]]
+
+    assert svc.undo() is True
+    assert svc.redo() is True
+    assert [list(p) for p in svc.state.regions[1]["vertices"]] == after_add
+
+    bundle_p = tmp_path / "u.bacmask"
+    svc.save_bundle(bundle_p)
+    svc2 = MaskService()
+    svc2.load_bundle(bundle_p)
+    assert [list(p) for p in svc2.state.regions[1]["vertices"]] == after_add
