@@ -1,6 +1,6 @@
 [project]
 name = "bacmask"
-version = "0.0.8"
+version = "0.0.9"
 description = "Bacteria colony masking and area measurement tool."
 readme = "CLAUDE.md"
 requires-python = ">=3.12,<3.13"
