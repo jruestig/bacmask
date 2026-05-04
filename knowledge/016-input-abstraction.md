@@ -4,7 +4,7 @@ title: Input Abstraction Layer
 tags: [architecture, ui]
 created: 2026-04-17
 status: accepted
-related: [001, 010, 014, 020, 031]
+related: [001, 010, 014, 020, 031, 036]
 ---
 
 # Input Abstraction Layer
@@ -23,20 +23,22 @@ All raw gestures are translated into a small vocabulary of **semantic input even
 - `Action(name)` — e.g. `"close_lasso"`, `"cancel_stroke"`, `"delete_region"`, `"undo"`, `"redo"`, `"save_bundle"`, `"export_csv"`, `"load_image"`, `"select_lasso"`, `"select_brush"`, `"toggle_brush_mode"`, `"pan_left"`, `"pan_right"`, `"pan_up"`, `"pan_down"`.
 
 ## Adapters
-- `DesktopInputAdapter` — translates Kivy mouse/keyboard events.
+- `DesktopInputAdapter` — translates Kivy mouse events only. Lives inside the canvas widget.
   - Left-drag → pointer sequence.
   - Middle-drag → `Pan`.
   - Wheel → `Zoom`.
-  - `Enter` → `Action("close_lasso")`.
-  - `Escape` → `Action("cancel_stroke")` — cancels whichever stroke is in flight (lasso or brush).
-  - `Delete` / `Backspace` → `Action("delete_region")`.
-  - `Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` → `Action("undo" | "redo")`.
-  - `Ctrl+S` → `Action("save_bundle")`.
-  - `Ctrl+E` → `Action("export_csv")`.
-  - `Ctrl+O` → `Action("load_image")`.
-  - `L` / `B` → `Action("select_lasso" | "select_brush")`.
-  - `Tab` → `Action("toggle_brush_mode")` — cycles `create → add → subtract → create`.
-  - `←` / `→` / `↑` / `↓` → `Action("pan_left" | "pan_right" | "pan_up" | "pan_down")` — see [031](031-minimap-navigator.md).
+- **Window-level keyboard** is handled directly by `BacMaskApp._on_key_down`, which calls `keybinding_for(key, modifiers)` (the lookup table below) and forwards the resolved name to `BacMaskApp.dispatch_action(name)` — the single dispatcher (see [036](036-single-action-dispatcher.md)). Kivy delivers key events to `Window`, not to widgets, so a per-widget keyboard adapter would be unreachable.
+- Keybindings (resolved by `keybinding_for`):
+  - `Enter` → `"close_lasso"`.
+  - `Escape` → `"cancel_stroke"` — cancels whichever stroke is in flight (lasso, brush, or line).
+  - `Delete` / `Backspace` → `"delete_region"`.
+  - `Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` → `"undo" | "redo"`.
+  - `Ctrl+S` → `"save_bundle"`.
+  - `Ctrl+E` → `"export_csv"`.
+  - `Ctrl+O` → `"load_image"`.
+  - `L` / `B` / `M` → `"select_lasso" | "select_brush" | "select_line"`.
+  - `Tab` → `"toggle_brush_mode"` — cycles `create → add → subtract → create`.
+  - `←` / `→` / `↑` / `↓` → `"pan_left" | "pan_right" | "pan_up" | "pan_down"` — see [031](031-minimap-navigator.md).
 - `TouchInputAdapter` (future, post-MVP — see [020](020-platform-scope.md)) — multi-touch gestures.
   - Single-finger drag → pointer sequence.
   - Two-finger pinch → `Zoom`.
@@ -63,3 +65,4 @@ Action names are mapped to keys via `config.yaml` ([006](006-configuration-manag
 - [001 — Separation of Concerns](001-separation-of-concerns.md) — the layer keeps `ui/` thin.
 - [014 — Lasso Tool](014-lasso-tool.md) — primary consumer.
 - [020 — Platform Scope](020-platform-scope.md) — why the touch adapter can wait.
+- [036 — Single Action Dispatcher](036-single-action-dispatcher.md) — collapsed dual app/canvas dispatch into one.

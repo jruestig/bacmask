@@ -3,8 +3,9 @@ id: 008
 title: Directory Layout (Authoritative)
 tags: [architecture]
 created: 2026-04-17
+updated: 2026-05-04
 status: accepted
-related: [001, 002, 003, 005, 006, 007, 009, 014, 015, 016, 019]
+related: [001, 002, 003, 005, 006, 007, 009, 014, 015, 016, 019, 035]
 ---
 
 # Directory Layout (Authoritative)
@@ -19,7 +20,7 @@ bacmask/
 │   │   ├── state.py                # SessionState (see 002)
 │   │   ├── masking.py              # polygon rasterization, label assignment
 │   │   ├── area.py                 # px → mm² area computation
-│   │   ├── io_manager.py           # images, mask PNG, .bacmask bundle, CSV
+│   │   ├── io_manager.py           # source carriers + decoders + write fns (see 035)
 │   │   ├── calibration.py          # scale validation (see 017)
 │   │   ├── commands.py             # LassoClose/VertexEdit/DeleteRegionCommand (see 003, 014)
 │   │   ├── history.py              # UndoRedoStack (see 003)
@@ -87,6 +88,7 @@ bacmask/
 - `ui/widgets/toolbar.py` now lists lasso / undo / redo / delete / save.
 - `output/masks/` → `output/bundles/` — mask PNGs live inside `.bacmask` rather than standalone ([015](015-bacmask-bundle.md)).
 - Added `ui/input/` for semantic input adapters ([016](016-input-abstraction.md)).
+- `io_manager.py` split into source carriers (`ImageSource`, `BundleSource`) + pure decoders (`decode_image`, `open_bundle`) + path shims ([035](035-io-source-carriers.md)). No new module — same file, two layers.
 
 ## Related
 Every other architecture note links back here. See this file's `related:` frontmatter.

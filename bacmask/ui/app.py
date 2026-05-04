@@ -37,6 +37,7 @@ class BacMaskApp(App):
             on_load=self._open_load_dialog,
             on_save=self._save_bundle,
             on_export=self._export_csv,
+            on_action=self.dispatch_action,
         )
         Window.bind(on_key_down=self._on_key_down)
         if self._initial_path is not None:
@@ -75,9 +76,9 @@ class BacMaskApp(App):
         action = keybinding_for(key_name, set(modifiers))
         if action is None:
             return False
-        return self._run_action(action)
+        return self.dispatch_action(action)
 
-    def _run_action(self, action: str) -> bool:
+    def dispatch_action(self, action: str) -> bool:
         svc = self.service
         if action == "close_lasso":
             svc.close_lasso()

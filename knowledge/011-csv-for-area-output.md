@@ -3,9 +3,9 @@ id: 011
 title: CSV for Area Output
 tags: [architecture, core]
 created: 2026-04-17
-updated: 2026-04-19
+updated: 2026-05-04
 status: accepted
-related: [000, 005, 012, 014, 015, 017, 030]
+related: [000, 005, 012, 014, 015, 017, 030, 035]
 ---
 
 # CSV for Area Output
@@ -55,8 +55,15 @@ Pre-[030](030-polygons-are-mask-truth.md) builds wrote `area_px` as `mask.sum()`
 ## When we'd revisit
 Multi-image aggregation becoming a first-class feature → long-form CSV across all images (grouped by `filename`) or parquet. Out of MVP.
 
+## Write target (2026-05-04)
+
+`save_areas_csv(target, rows)` — `target` accept `Path | str | BinaryIO`. Stream branch wrap with `TextIOWrapper(encoding="utf-8", newline="")` then `detach` so caller own the underlying buffer. Path branch unchanged. Same dialect either way.
+
+Why: Android SAF write hand a writable `BinaryIO` (file descriptor wrapper). No need for temp-file dance. See [035](035-io-source-carriers.md).
+
 ## Related
 - [015 — .bacmask Bundle](015-bacmask-bundle.md).
 - [014 — Lasso Tool](014-lasso-tool.md) — ID assignment rules.
 - [017 — Calibration Input](017-calibration-input.md) — uncalibrated semantics.
 - [005 — Testing Strategy](005-testing-strategy.md) — CSV contract tests.
+- [035 — I/O Source Carriers](035-io-source-carriers.md) — write-side stream support.

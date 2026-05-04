@@ -4,7 +4,7 @@ title: Minimap Navigator + Keyboard Pan
 tags: [ui, perf]
 created: 2026-04-19
 status: accepted
-related: [004, 016, 020, 027]
+related: [004, 016, 020, 027, 036]
 ---
 
 # Minimap Navigator + Keyboard Pan

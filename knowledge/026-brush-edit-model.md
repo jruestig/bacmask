@@ -5,7 +5,7 @@ tags: [architecture, core, ui]
 created: 2026-04-19
 updated: 2026-04-19
 status: accepted
-related: [002, 003, 013, 014, 016, 023, 025, 027, 030]
+related: [002, 003, 013, 014, 016, 023, 025, 027, 030, 036]
 ---
 
 # Brush Edit Model

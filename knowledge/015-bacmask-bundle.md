@@ -3,9 +3,9 @@ id: 015
 title: .bacmask Bundle Format
 tags: [architecture, core]
 created: 2026-04-17
-updated: 2026-04-19
+updated: 2026-05-04
 status: accepted
-related: [011, 014, 017, 024, 025, 032]
+related: [011, 014, 017, 024, 025, 032, 035]
 ---
 
 # .bacmask Bundle Format
@@ -88,9 +88,21 @@ project.bacmask/
 - Readers check `bacmask_version`. v1 and v2 are both accepted; unknown versions refused.
 - Future versions should add a `migrate_v{N}_to_v{N+1}` helper in `core/io_manager.py`.
 
+## I/O surface (2026-05-04)
+
+Bundle load + save go through source carriers ([035](035-io-source-carriers.md)):
+
+- `open_bundle(BundleSource) -> BundleContents` — pure decoder, no filesystem.
+- `BundleContents` carry `image, image_ext, image_bytes, meta`. `image_bytes` = verbatim source bytes — service re-bundle on save without re-opening zip.
+- `save_bundle_from_bytes(target, …)` — `target` accept `Path | str | BinaryIO`. `zipfile.ZipFile` natively support both.
+- `load_bundle(path)` keep as Path shim for desktop callers.
+
+Android SAF: hand `BinaryIO` to `BundleSource.from_stream` / save target. No Path branch needed.
+
 ## Related
 - [011 — CSV for Area Output](011-csv-for-area-output.md) — produced by Export.
 - [014 — Lasso Tool](014-lasso-tool.md) — consumer of vertex persistence.
 - [017 — Calibration Input](017-calibration-input.md) — `scale_mm_per_px` semantics.
 - [024 — Mask Export (deferred)](024-mask-export-deferred.md) — downstream raster export; not part of the bundle.
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — invariant change that justified removing the in-bundle mask.
+- [035 — I/O Source Carriers](035-io-source-carriers.md) — how bundle bytes enter and leave the decoder.

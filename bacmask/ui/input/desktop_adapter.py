@@ -1,11 +1,17 @@
-"""Kivy mouse + keyboard → semantic InputEvents. See knowledge/016."""
+"""Kivy mouse → semantic InputEvents + keybinding registry. See knowledge/016.
+
+Window-level keyboard input is dispatched by :class:`bacmask.ui.app.BacMaskApp`
+calling :func:`keybinding_for` directly — Kivy delivers key events to
+``Window``, not to widgets, so the canvas-bound :class:`DesktopInputAdapter`
+never sees them. The registry lives here so toolbar labels (027) and the
+window handler share one source of truth.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
 from .events import (
-    Action,
     InputEvent,
     Pan,
     PointerDown,
@@ -104,11 +110,15 @@ def button_label(action: str, base_text: str) -> str:
 
 
 class DesktopInputAdapter:
-    """Translate Kivy touch + keyboard events into :mod:`bacmask.ui.input.events`.
+    """Translate Kivy touch events into :mod:`bacmask.ui.input.events`.
 
     The ``emit`` callback receives one :class:`InputEvent` per semantic event.
     Mouse scroll becomes :class:`Zoom`; middle-mouse drag becomes :class:`Pan`;
-    keyboard combos resolve via :data:`DEFAULT_KEYBINDINGS`.
+    left-button press/move/release becomes a :class:`PointerDown` / :class:`PointerMove`
+    / :class:`PointerUp` sequence. Keyboard input is handled at the window
+    level by :class:`bacmask.ui.app.BacMaskApp` via :func:`keybinding_for` —
+    Kivy delivers key events to ``Window``, not to widgets, so this adapter
+    never sees them.
     """
 
     def __init__(self, emit: Callable[[InputEvent], None]) -> None:
@@ -159,15 +169,5 @@ class DesktopInputAdapter:
         if self._drag_mode == "pan":
             self._drag_mode = None
             self._last_pan_pos = None
-            return True
-        return False
-
-    # ---- Kivy keyboard events ------------------------------------------------
-
-    def on_key_down(self, keyboard, keycode, text, modifiers) -> bool:
-        key_name = keycode[1] if isinstance(keycode, tuple) else str(keycode)
-        action_name = keybinding_for(key_name, set(modifiers))
-        if action_name is not None:
-            self._emit(Action(name=action_name))
             return True
         return False

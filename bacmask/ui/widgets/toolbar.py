@@ -152,7 +152,7 @@ class Toolbar(BoxLayout):
     # ---- delete -------------------------------------------------------------
 
     def _delete(self) -> None:
-        # Mirrors the Del/Backspace key handler in ``app._run_action`` — line
+        # Mirrors the Del/Backspace key handler in ``app.dispatch_action`` — line
         # selection wins because it requires an explicit results-panel click,
         # while a region selection can linger from a prior canvas tap.
         line_id = self.service.state.selected_line_id

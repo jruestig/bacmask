@@ -4,7 +4,7 @@ title: Separation of Concerns (MVC-ish)
 tags: [architecture, core, services, ui]
 created: 2026-04-17
 status: accepted
-related: [002, 005, 008]
+related: [002, 005, 008, 036]
 ---
 
 # Separation of Concerns

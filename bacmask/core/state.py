@@ -80,10 +80,22 @@ class SessionState:
     # table uses this to skip rebuilding line rows on selection-only notifies.
     lines_version: int = 0
 
-    def set_image(self, image: np.ndarray, path: Path) -> None:
+    def set_image(
+        self,
+        image: np.ndarray,
+        *,
+        name: str,
+        origin: Path | None = None,
+    ) -> None:
+        """Reset session state around a freshly loaded image.
+
+        ``name`` is the display filename (used for save-as defaults and
+        bundle metadata). ``origin`` is the filesystem path the image was
+        read from when applicable, or ``None`` for SAF / in-memory sources.
+        """
         self.image = image
-        self.image_path = Path(path)
-        self.image_filename = Path(path).name
+        self.image_path = origin
+        self.image_filename = name
         self.image_bytes = None
         self.image_ext = None
         h, w = image.shape[:2]

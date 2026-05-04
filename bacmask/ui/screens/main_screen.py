@@ -27,6 +27,7 @@ class MainScreen(BoxLayout):
         on_load: Callable[[], None],
         on_save: Callable[[], None],
         on_export: Callable[[], None],
+        on_action: Callable[[str], bool],
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("orientation", "vertical")
@@ -42,7 +43,7 @@ class MainScreen(BoxLayout):
         self._brush_panel_attached = False
 
         body = BoxLayout(orientation="horizontal")
-        self.canvas_widget = ImageCanvas(service)
+        self.canvas_widget = ImageCanvas(service, on_action=on_action)
         body.add_widget(self.canvas_widget)
         self.results = ResultsTable(service, size_hint_x=0.3)
         body.add_widget(self.results)

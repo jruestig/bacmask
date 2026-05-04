@@ -40,10 +40,16 @@ def _region_pixels(svc: MaskService, label_id: int) -> int:
 def _canvas(svc: MaskService, widget_w: float = 400.0, widget_h: float = 400.0) -> ImageCanvas:
     c: ImageCanvas = ImageCanvas.__new__(ImageCanvas)
     c.service = svc
+    c._on_action = None
     c._image_texture = None
     c._overlay_texture = None
     c._last_image = svc.state.image
     c._last_regions_version = -1
+    c._last_brush_stroke_active = False
+    c._brush_preview_pts = []
+    c._overlay_acc_rgb = None
+    c._overlay_acc_a = None
+    c._overlay_rgba_buf = None
     c._ghost_texture = None
     c._ghost_signature = None
     c._last_pointer_pos = None
@@ -54,6 +60,7 @@ def _canvas(svc: MaskService, widget_w: float = 400.0, widget_h: float = 400.0) 
     c.width = widget_w
     c.height = widget_h
     c._repaint = lambda: None  # type: ignore[method-assign]
+    c._blit_overlay_texture = lambda *_a, **_kw: None  # type: ignore[method-assign]
     return c
 
 
@@ -181,3 +188,36 @@ def test_brush_subtract_drag_release_shrinks_region():
 
     after = _region_pixels(svc, 1)
     assert after < before
+
+
+# ---- brush preview cleanup as state effect ---------------------------------
+
+
+def test_cancel_brush_stroke_clears_canvas_preview_via_state_subscription():
+    """Cancelling a brush stroke from outside the canvas (e.g. window-level
+    Esc) must clear ``_brush_preview_pts``. The cleanup is driven by the
+    ``active_brush_stroke`` non-None → None transition, not by the dispatcher
+    that handled the key — which is why a state subscription owns it.
+    """
+    svc = _service_with_region()
+    svc.set_active_tool("brush")
+    c = _canvas(svc)
+    # Subscribe so the state notification drives the canvas's transition logic.
+    svc.subscribe(c._on_state_changed)
+
+    c._on_input(
+        PointerDown(
+            pos=_widget_pos_for_image_pixel(c, (15.0, 15.0), (50, 50)),
+            is_double=False,
+        )
+    )
+    assert svc.state.active_brush_stroke is not None
+    assert c._brush_preview_pts == [(15, 15)]
+
+    # Simulate window-keyboard ``cancel_stroke`` — the same call
+    # ``BacMaskApp.dispatch_action("cancel_stroke")`` makes when the brush
+    # stroke is in flight.
+    svc.cancel_brush_stroke()
+
+    assert svc.state.active_brush_stroke is None
+    assert c._brush_preview_pts == []

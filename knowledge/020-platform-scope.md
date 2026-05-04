@@ -3,8 +3,9 @@ id: 020
 title: Platform Scope (Desktop-First MVP)
 tags: [architecture, ops]
 created: 2026-04-17
+updated: 2026-05-04
 status: accepted
-related: [000, 010, 016]
+related: [000, 010, 016, 035, 036]
 ---
 
 # Platform Scope
@@ -24,6 +25,7 @@ macOS is not a target for MVP. Likely works (Kivy + Python 3.12), but not valida
 ## Architectural hooks kept for later
 Android readiness is preserved without Android being a current target:
 - [016 — Input Abstraction Layer](016-input-abstraction.md) — touch profile can slot in without touching core.
+- [035 — I/O Source Carriers](035-io-source-carriers.md) — load + save go through `ImageSource` / `BundleSource` / `BinaryIO` sinks. SAF wrapper become 3 lines (open fd → carrier → service). No Path-only assumption left in core.
 - [010 — Kivy over BeeWare](010-kivy-over-beeware.md) — Buildozer is a documented path when we're ready.
 - `opencv-python-headless` is the declared dep — no GUI binaries leak in that would break headless / Android builds.
 - Output path is configurable ([006](006-configuration-management.md)) — Android sandbox paths accommodable without code changes.
@@ -36,3 +38,4 @@ MVP ships, gets real desktop use for at least a few weeks, then Android is a dis
 - [000 — Project Overview](000-project-overview.md).
 - [010 — Kivy over BeeWare](010-kivy-over-beeware.md).
 - [016 — Input Abstraction Layer](016-input-abstraction.md).
+- [035 — I/O Source Carriers](035-io-source-carriers.md).

@@ -72,6 +72,12 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Preserves c
 - [033 — File Picker Breadcrumb Path Bar](033-file-picker-breadcrumb-bar.md) — clickable path segments above every chooser; one-click jump to any ancestor.
 - [034 — Windows "Open with BacMask" for Image Files](034-windows-image-open-with.md) — opt-in installer task; OpenWithProgids only; never becomes default.
 
+### Core I/O abstraction (2026-05-04)
+- [035 — I/O Source Carriers (Path-Free Decode)](035-io-source-carriers.md) — `ImageSource` / `BundleSource` carriers + pure decoders; load/save accept streams; Android SAF wires in without core changes.
+
+### UI dispatch consolidation (2026-05-04)
+- [036 — Single Action Dispatcher (App-Level)](036-single-action-dispatcher.md) — collapsed window-keyboard + canvas dispatchers into `BacMaskApp.dispatch_action`; canvas brush-preview cleanup moved to a state subscription.
+
 ### Superseded (archived in [`superseded/`](superseded/))
 Retired decisions kept for reasoning trails and decision-record context. Do **not** implement against these — each carries a banner pointing to its replacement.
 

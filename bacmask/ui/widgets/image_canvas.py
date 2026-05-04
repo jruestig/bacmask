@@ -8,6 +8,7 @@ See knowledge/004 (perf), 014 (lasso), 016 (input), 026 (brush).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import cv2
@@ -103,15 +104,30 @@ def _vertex_bbox_clipped(
 
 
 class ImageCanvas(Widget):
-    def __init__(self, service: MaskService, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        service: MaskService,
+        *,
+        on_action: Callable[[str], bool] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.service = service
+        # Canvas is a pure translator — Action events route up to the app's
+        # single dispatcher. ``None`` is allowed so tests can build the widget
+        # without wiring; in that case Action events are silently dropped.
+        self._on_action: Callable[[str], bool] | None = on_action
         self._image_texture: Texture | None = None
         self._overlay_texture: Texture | None = None
         self._last_image: np.ndarray | None = None
         # -1 forces overlay rebuild on the first state notification even when
         # `regions_version` is still 0 (e.g. bundle loaded into a fresh state).
         self._last_regions_version: int = -1
+        # Edge-detection for brush-stroke end. When the active stroke
+        # transitions non-None → None (commit, cancel, or subtract-empties-
+        # delete), the canvas-local preview points get cleared as a state
+        # effect — not as a side-effect of which key was pressed.
+        self._last_brush_stroke_active: bool = False
         # Rendering cache: float32 alpha-over accumulators (RGB + A) plus the
         # uint8 RGBA buffer uploaded to the GPU. Populated on every
         # ``regions_version`` bump by walking ``state.regions`` (polygons are
@@ -165,6 +181,10 @@ class ImageCanvas(Widget):
         if state.regions_version != self._last_regions_version:
             self._update_overlay()
             self._last_regions_version = state.regions_version
+        stroke_active_now = state.active_brush_stroke is not None
+        if self._last_brush_stroke_active and not stroke_active_now:
+            self._brush_preview_pts = []
+        self._last_brush_stroke_active = stroke_active_now
         self._repaint()
 
     def _rebuild_image_texture(self) -> None:
@@ -737,7 +757,8 @@ class ImageCanvas(Widget):
         elif isinstance(event, Pan):
             self._apply_pan(event.delta, (img_w, img_h))
         elif isinstance(event, Action):
-            self._handle_action(event.name)
+            if self._on_action is not None:
+                self._on_action(event.name)
 
     # ---- per-tool pointer handlers -----------------------------------------
 
@@ -755,7 +776,6 @@ class ImageCanvas(Widget):
         target = self.service.begin_brush_stroke(xy)
         if target is None:
             # No region under cursor and no selection → no-op.
-            self._brush_preview_pts = []
             return
         self._brush_preview_pts = [xy]
 
@@ -768,8 +788,10 @@ class ImageCanvas(Widget):
     def _on_pointer_up(self, xy: tuple[int, int] | None) -> None:
         svc = self.service
         if svc.state.active_brush_stroke is not None:
+            # ``end_brush_stroke`` flips ``state.active_brush_stroke`` to None;
+            # the canvas's state subscription clears ``_brush_preview_pts`` on
+            # that transition (see ``_on_state_changed``).
             svc.end_brush_stroke()
-            self._brush_preview_pts = []
             return
         if svc.state.active_lasso is not None:
             svc.close_lasso()
@@ -873,52 +895,6 @@ class ImageCanvas(Widget):
         if label == 0 or label not in self.service.state.regions:
             return None
         return label
-
-    def _handle_action(self, name: str) -> None:
-        svc = self.service
-        if name == "close_lasso":
-            svc.close_lasso()
-        elif name == "cancel_stroke":
-            # Whichever stroke is in flight, discard it. No history entry.
-            if svc.state.active_brush_stroke is not None:
-                svc.cancel_brush_stroke()
-                self._brush_preview_pts = []
-            elif svc.state.active_line is not None:
-                svc.cancel_line()
-            else:
-                svc.cancel_lasso()
-        elif name == "undo":
-            svc.undo()
-        elif name == "redo":
-            svc.redo()
-        elif name == "delete_region":
-            # Delete acts on whichever object is selected. Lines are checked
-            # first because line selection requires an explicit click in the
-            # results panel, while a region selection can linger from a prior
-            # canvas tap.
-            line_id = svc.state.selected_line_id
-            if line_id is not None:
-                try:
-                    svc.delete_line(line_id)
-                except KeyError:
-                    pass
-                return
-            sid = svc.state.selected_region_id
-            if sid is not None:
-                try:
-                    svc.delete_region(sid)
-                except KeyError:
-                    pass
-        elif name == "select_lasso":
-            svc.set_active_tool("lasso")
-        elif name == "select_brush":
-            svc.set_active_tool("brush")
-        elif name == "select_line":
-            svc.set_active_tool("line")
-        elif name == "toggle_brush_mode":
-            svc.toggle_brush_default_mode()
-        elif name in ("pan_left", "pan_right", "pan_up", "pan_down"):
-            self.pan_by_action(name)
 
     def _widget_pos_to_image(
         self,

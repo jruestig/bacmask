@@ -1,3 +1,4 @@
+import io
 import json
 import zipfile
 from pathlib import Path
@@ -305,3 +306,121 @@ def test_resaving_v1_bundle_promotes_to_v2(tmp_path):
     assert names == {"image.png", "meta.json"}
     assert meta_json["bacmask_version"] == 2
     assert meta_json["image_shape"] == [20, 30]
+
+
+# --- source carriers (filesystem-free I/O) ------------------------------------
+
+
+def _encode_png_bytes(shape: tuple[int, int] = (20, 30), seed: int = 0) -> bytes:
+    arr = np.random.default_rng(seed).integers(0, 255, shape, dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", arr)
+    assert ok
+    return buf.tobytes()
+
+
+def test_image_source_from_path_reads_bytes_and_normalizes_ext(tmp_path):
+    p = _write_synthetic_image(tmp_path, "x.PNG")
+    src = iom.ImageSource.from_path(p)
+    assert src.data == p.read_bytes()
+    assert src.ext == ".png"  # lowercased
+    assert src.name == "x.PNG"
+    assert src.origin == p
+
+
+def test_image_source_from_path_missing_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        iom.ImageSource.from_path(tmp_path / "nope.png")
+
+
+def test_image_source_from_bytes_normalizes_ext_no_origin():
+    src = iom.ImageSource.from_bytes(b"data", ext="TIF", name="x.tif")
+    assert src.ext == ".tif"
+    assert src.origin is None
+
+
+def test_image_source_from_stream_round_trip():
+    payload = _encode_png_bytes()
+    fp = io.BytesIO(payload)
+    src = iom.ImageSource.from_stream(fp, ext=".png", name="mem.png")
+    assert src.data == payload
+    assert src.origin is None
+
+
+def test_decode_image_from_in_memory_source():
+    """Filesystem-free decode — proves the abstraction holds for SAF / streams."""
+    src = iom.ImageSource.from_bytes(_encode_png_bytes(), ext=".png", name="mem.png")
+    img = iom.decode_image(src)
+    assert isinstance(img, np.ndarray)
+    assert img.shape == (20, 30)
+
+
+def test_decode_image_rejects_garbage():
+    src = iom.ImageSource.from_bytes(b"not an image", ext=".png", name="bad.png")
+    with pytest.raises(ValueError):
+        iom.decode_image(src)
+
+
+def test_bundle_source_round_trip_via_bytesio():
+    """Save to BytesIO, wrap as BundleSource, parse back — no filesystem."""
+    image_bytes = _encode_png_bytes()
+    meta = iom.BundleMeta(
+        source_filename="mem.png",
+        image_shape=(20, 30),
+        scale_mm_per_px=0.0125,
+        next_label_id=3,
+        regions=_sample_regions(),
+    )
+    sink = io.BytesIO()
+    iom.save_bundle_from_bytes(
+        sink,
+        image_bytes=image_bytes,
+        image_ext=".png",
+        image_shape=(20, 30),
+        meta=meta,
+    )
+
+    src = iom.BundleSource.from_bytes(sink.getvalue(), name="mem.bacmask")
+    contents = iom.open_bundle(src)
+    assert contents.image.shape == (20, 30)
+    assert contents.image_ext == ".png"
+    assert contents.image_bytes == image_bytes
+    assert contents.meta.source_filename == "mem.png"
+    assert contents.meta.scale_mm_per_px == 0.0125
+    assert contents.meta.regions[1]["vertices"] == _sample_regions()[1]["vertices"]
+
+
+def test_bundle_source_from_stream_matches_from_path(tmp_path):
+    img_path = _write_synthetic_image(tmp_path)
+    meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
+    bundle_path = tmp_path / "x.bacmask"
+    iom.save_bundle(bundle_path, img_path, (20, 30), meta)
+
+    via_path = iom.open_bundle(iom.BundleSource.from_path(bundle_path))
+    with open(bundle_path, "rb") as fp:
+        via_stream = iom.open_bundle(iom.BundleSource.from_stream(fp, name=bundle_path.name))
+
+    assert via_path.image_bytes == via_stream.image_bytes
+    assert via_path.meta.image_shape == via_stream.meta.image_shape
+
+
+def test_open_bundle_carries_image_bytes(tmp_path):
+    """``BundleContents`` exposes the raw bundled image bytes — service uses
+    this to avoid re-opening the zip just to recover the source bytes."""
+    img_path = _write_synthetic_image(tmp_path)
+    original = img_path.read_bytes()
+    meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
+    bundle_path = tmp_path / "x.bacmask"
+    iom.save_bundle(bundle_path, img_path, (20, 30), meta)
+
+    contents = iom.open_bundle(iom.BundleSource.from_path(bundle_path))
+    assert contents.image_bytes == original
+
+
+def test_save_areas_csv_to_stream():
+    rows = [iom.AreaRow("a.tif", 1, "region_01", 100.0, 1.0, 0.1)]
+    sink = io.BytesIO()
+    iom.save_areas_csv(sink, rows)
+    text = sink.getvalue().decode()
+    lines = text.splitlines()
+    assert lines[0] == "filename,region_id,region_name,area_px,area_mm2,scale_factor"
+    assert lines[1] == "a.tif,1,region_01,100.0,1.0,0.1"

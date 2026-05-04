@@ -11,7 +11,6 @@ See knowledge/001 (separation), 002 (state), 003 (commands), 014 (lasso),
 from __future__ import annotations
 
 import logging
-import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -27,6 +26,7 @@ from bacmask.core.commands import (
     LassoCloseCommand,
 )
 from bacmask.core.history import UndoRedoStack
+from bacmask.core.io_manager import BundleSource, ImageSource
 from bacmask.core.state import BrushStroke, SessionState, Tool
 
 log = logging.getLogger(__name__)
@@ -98,24 +98,37 @@ class MaskService:
 
     # ---- loading ------------------------------------------------------------
 
-    def load_image(self, path: Path | str) -> None:
-        p = Path(path)
-        img = io_manager.load_image(p)
-        self.state.set_image(img, p)
-        self.state.image_bytes = p.read_bytes()
-        self.state.image_ext = p.suffix.lower() or ".bin"
+    def load_image_source(self, source: ImageSource) -> None:
+        """Canonical image-load path.
+
+        Decodes ``source.data`` once and reuses the bytes for the bundle's
+        verbatim source-image storage. Use :meth:`load_image` for the
+        filesystem-path convenience wrapper.
+        """
+        img = io_manager.decode_image(source)
+        self.state.set_image(img, name=source.name, origin=source.origin)
+        self.state.image_bytes = source.data
+        self.state.image_ext = source.ext
         self.history.clear()
         self._active_lasso = []
         self._notify()
 
-    def load_bundle(self, path: Path | str) -> None:
-        p = Path(path)
-        bundle = io_manager.load_bundle(p)
+    def load_image(self, path: Path | str) -> None:
+        """Convenience: load an image from a filesystem path."""
+        self.load_image_source(ImageSource.from_path(path))
+
+    def load_bundle_source(self, source: BundleSource) -> None:
+        """Canonical bundle-load path.
+
+        Parses ``source.data`` once via :func:`io_manager.open_bundle` and
+        reuses the contained image bytes — no second zip open. Use
+        :meth:`load_bundle` for the filesystem-path convenience wrapper.
+        """
+        bundle = io_manager.open_bundle(source)
         self.state.image = bundle.image
         self.state.image_path = None
         self.state.image_filename = bundle.meta.source_filename
-        with zipfile.ZipFile(p, "r") as zf:
-            self.state.image_bytes = zf.read(f"image{bundle.image_ext}")
+        self.state.image_bytes = bundle.image_bytes
         self.state.image_ext = bundle.image_ext
         h, w = bundle.image.shape[:2]
         self.state.regions = {int(k): v for k, v in bundle.meta.regions.items()}
@@ -140,6 +153,10 @@ class MaskService:
         self.history.clear()
         self._active_lasso = []
         self._notify()
+
+    def load_bundle(self, path: Path | str) -> None:
+        """Convenience: load a ``.bacmask`` bundle from a filesystem path."""
+        self.load_bundle_source(BundleSource.from_path(path))
 
     # ---- tool selection -----------------------------------------------------
 
