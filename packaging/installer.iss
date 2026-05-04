@@ -9,7 +9,7 @@
 ;   2. iscc packaging\installer.iss                (produces dist\bacmask-setup-<ver>.exe)
 
 #define MyAppName       "BacMask"
-#define MyAppVersion    "0.0.9"
+#define MyAppVersion    "0.0.10"
 #define MyAppPublisher  "BacMask"
 #define MyAppExeName    "bacmask.exe"
 #define MyAppId         "{{A0F3C2B4-6D8E-4F12-9E3C-1B2A4D5E6F70}"
