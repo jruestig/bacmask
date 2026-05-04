@@ -476,3 +476,35 @@ def test_save_areas_csv_to_stream():
     lines = text.splitlines()
     assert lines[0] == "filename,region_id,region_name,area_px,area_mm2,scale_factor"
     assert lines[1] == "a.tif,1,region_01,100.0,1.0,0.1"
+
+
+# --- Lines CSV ----------------------------------------------------------------
+
+
+def test_lines_csv_schema_header_locked(tmp_path):
+    p = tmp_path / "a_lines.csv"
+    iom.save_lines_csv(p, [])
+    lines = p.read_text().splitlines()
+    assert lines[0] == "filename,line_id,line_name,length_px,length_mm,scale_factor"
+
+
+def test_lines_csv_rows_written_in_order(tmp_path):
+    rows = [
+        iom.LineRow("a.tif", 1, "line_1", 20.0, 0.2, 0.01),
+        iom.LineRow("a.tif", 2, "line_2", 50.0, None, None),
+    ]
+    p = tmp_path / "a_lines.csv"
+    iom.save_lines_csv(p, rows)
+    lines = p.read_text().splitlines()
+    assert lines[1] == "a.tif,1,line_1,20.0,0.2,0.01"
+    assert lines[2] == "a.tif,2,line_2,50.0,,"
+
+
+def test_save_lines_csv_to_stream():
+    rows = [iom.LineRow("a.tif", 1, "line_1", 20.0, 0.2, 0.01)]
+    sink = io.BytesIO()
+    iom.save_lines_csv(sink, rows)
+    text = sink.getvalue().decode()
+    lines = text.splitlines()
+    assert lines[0] == "filename,line_id,line_name,length_px,length_mm,scale_factor"
+    assert lines[1] == "a.tif,1,line_1,20.0,0.2,0.01"

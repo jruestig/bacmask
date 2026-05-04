@@ -49,6 +49,15 @@ CSV_HEADER = [
     "scale_factor",
 ]
 
+LINES_CSV_HEADER = [
+    "filename",
+    "line_id",
+    "line_name",
+    "length_px",
+    "length_mm",
+    "scale_factor",
+]
+
 
 class UnsupportedBundleVersion(Exception):
     def __init__(self, version: Any) -> None:
@@ -209,6 +218,51 @@ def _write_csv_rows(f: Any, rows: list[AreaRow]) -> None:
                 r.region_name,
                 r.area_px,
                 "" if r.area_mm2 is None else str(r.area_mm2),
+                "" if r.scale_factor is None else str(r.scale_factor),
+            ]
+        )
+
+
+@dataclass
+class LineRow:
+    filename: str
+    line_id: int
+    line_name: str
+    length_px: float
+    length_mm: float | None  # None -> empty cell (uncalibrated)
+    scale_factor: float | None  # None -> empty cell (uncalibrated)
+
+
+def save_lines_csv(target: Path | str | BinaryIO, rows: list[LineRow]) -> None:
+    """Write the sibling measurement-lines CSV.
+
+    Same dialect / target semantics as :func:`save_areas_csv` — accepts a
+    filesystem path or a writable binary stream. Schema is locked to
+    :data:`LINES_CSV_HEADER`.
+    """
+    if isinstance(target, (str, Path)):
+        with open(target, "w", newline="") as f:
+            _write_lines_csv_rows(f, rows)
+        return
+    text = io.TextIOWrapper(target, encoding="utf-8", newline="", write_through=True)
+    try:
+        _write_lines_csv_rows(text, rows)
+        text.flush()
+    finally:
+        text.detach()
+
+
+def _write_lines_csv_rows(f: Any, rows: list[LineRow]) -> None:
+    w = csv.writer(f, lineterminator="\n")
+    w.writerow(LINES_CSV_HEADER)
+    for r in rows:
+        w.writerow(
+            [
+                r.filename,
+                r.line_id,
+                r.line_name,
+                r.length_px,
+                "" if r.length_mm is None else str(r.length_mm),
                 "" if r.scale_factor is None else str(r.scale_factor),
             ]
         )

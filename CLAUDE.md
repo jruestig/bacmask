@@ -94,6 +94,12 @@ area_mm2 = pixel_count * (scale_factor_mm_per_px ** 2)
   One row per region; areas computed from polygons. Overwrite on re-export.
   `area_px` is per-region and inclusive of any overlap — a shared pixel is counted once per region that contains it.
 
+- **`<image_stem>_lines.csv`** — sibling, written only when measurement lines exist. Locked column order:
+  ```
+  filename, line_id, line_name, length_px, length_mm, scale_factor
+  ```
+  One row per line; length is the Euclidean distance between the line's endpoints. `length_mm` and `scale_factor` are empty when uncalibrated. Path derivation: if the chosen areas path ends in `_areas.csv` the suffix is swapped to `_lines.csv`; otherwise `_lines` is inserted before the extension.
+
 **Mask export** for training is a separate, non-UI Python operation ([knowledge/024](knowledge/024-mask-export-deferred.md)) — deferred; not MVP.
 
 Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowledge/011-csv-for-area-output.md), [knowledge/025](knowledge/025-overlapping-regions.md).

@@ -1,9 +1,10 @@
 """Kivy results table: scrollable list of region_id | name | area_px | area_mm².
 
 Measurement lines are appended below the regions section as a separate group:
-``L<id> | name | length_px | <blank>``. Lines are session-only (not persisted
-to the bundle, not exported to CSV), so they do not share the area schema —
-the mm² column stays empty for line rows.
+``L<id> | name | length_px | <blank>``. Lines are persisted in the bundle's
+meta.json and exported to a sibling ``<stem>_lines.csv`` next to the areas
+CSV; here in the panel the mm² column stays empty for line rows because they
+report length, not area.
 """
 
 from __future__ import annotations

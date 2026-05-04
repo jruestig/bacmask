@@ -265,6 +265,53 @@ def test_save_bundle_does_not_write_csv(tmp_path):
     assert list(tmp_path.glob("*.csv")) == []
 
 
+def test_export_csv_emits_lines_sibling_when_lines_present(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square())
+    svc.set_calibration(0.01)
+    svc.set_active_tool("line")
+    svc.begin_line((5, 5))
+    svc.commit_line((25, 5))
+
+    areas_p = tmp_path / "out_areas.csv"
+    lines_p = tmp_path / "out_lines.csv"
+    svc.export_csv(areas_p)
+
+    assert areas_p.exists()
+    assert lines_p.exists()
+    contents = lines_p.read_text().splitlines()
+    assert contents[0] == "filename,line_id,line_name,length_px,length_mm,scale_factor"
+    assert contents[1].startswith("img.png,1,line_1,20.0,")
+
+
+def test_export_csv_skips_lines_sibling_when_no_lines(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square())
+
+    areas_p = tmp_path / "out_areas.csv"
+    svc.export_csv(areas_p)
+
+    assert areas_p.exists()
+    assert not (tmp_path / "out_lines.csv").exists()
+
+
+def test_export_csv_lines_sibling_path_for_non_areas_name(tmp_path):
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    _draw_lasso(svc, _square())
+    svc.set_active_tool("line")
+    svc.begin_line((5, 5))
+    svc.commit_line((25, 5))
+
+    chosen = tmp_path / "custom.csv"
+    svc.export_csv(chosen)
+
+    assert chosen.exists()
+    assert (tmp_path / "custom_lines.csv").exists()
+
+
 def test_export_csv_does_not_clear_dirty(tmp_path):
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))

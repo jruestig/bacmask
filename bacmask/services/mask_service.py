@@ -35,6 +35,18 @@ log = logging.getLogger(__name__)
 BRUSH_MODE_ORDER: tuple[str, ...] = ("create", "add", "subtract")
 
 
+def _lines_csv_sibling(areas_csv_path: Path | str) -> Path:
+    """Derive the lines CSV path from the user's chosen areas CSV path.
+
+    ``foo_areas.csv`` → ``foo_lines.csv``; anything else → insert ``_lines``
+    before the existing suffix (``foo.csv`` → ``foo_lines.csv``).
+    """
+    p = Path(areas_csv_path)
+    if p.name.endswith("_areas.csv"):
+        return p.with_name(p.name[: -len("_areas.csv")] + "_lines.csv")
+    return p.with_name(f"{p.stem}_lines{p.suffix}")
+
+
 def _disc_bbox(cx: int, cy: int, r: int, h: int, w: int) -> tuple[int, int, int, int]:
     """Half-open (y0, y1, x0, x1) bbox of a disc clipped to image bounds."""
     y0 = max(0, cy - r)
@@ -562,7 +574,8 @@ class MaskService:
 
     # ---- line measurement tool ---------------------------------------------
     # Measurement lines for hand-calibrating mm/px against a known scale bar.
-    # Persisted in the bundle's meta.json (knowledge/015); not exported to CSV;
+    # Persisted in the bundle's meta.json (knowledge/015); exported to a
+    # sibling ``<stem>_lines.csv`` alongside the areas CSV when present;
     # not part of the undo/redo stack. Clearing lines is a manual operation.
 
     def begin_line(self, pos: tuple[int, int]) -> None:
@@ -649,6 +662,34 @@ class MaskService:
                     "name": meta["name"],
                     "length_px": length_px,
                 }
+            )
+        return rows
+
+    def compute_line_csv_rows(self) -> list[io_manager.LineRow]:
+        """Per-line CSV rows. Length in px is the Euclidean endpoint distance;
+        ``length_mm`` is ``length_px * scale`` when calibrated, else ``None``.
+        Returned in ascending ``line_id`` order so the export is deterministic.
+        """
+        if self.state.image_filename is None or not self.state.lines:
+            return []
+        scale = self.state.scale_mm_per_px
+        rows: list[io_manager.LineRow] = []
+        for line_id, meta in sorted(self.state.lines.items()):
+            p1 = meta["p1"]
+            p2 = meta["p2"]
+            dx = float(p2[0] - p1[0])
+            dy = float(p2[1] - p1[1])
+            length_px = (dx * dx + dy * dy) ** 0.5
+            length_mm = length_px * scale if scale is not None else None
+            rows.append(
+                io_manager.LineRow(
+                    filename=self.state.image_filename,
+                    line_id=line_id,
+                    line_name=meta["name"],
+                    length_px=length_px,
+                    length_mm=length_mm,
+                    scale_factor=scale,
+                )
             )
         return rows
 
@@ -760,7 +801,16 @@ class MaskService:
         self._notify()
 
     def export_csv(self, csv_path: Path | str) -> None:
-        """Write the sibling areas CSV. Independent of saving the bundle."""
+        """Write the sibling areas CSV. Independent of saving the bundle.
+
+        When measurement lines exist, also writes a sibling lines CSV next to
+        the areas file: ``<stem>_lines.csv``. If the chosen path ends with
+        ``_areas.csv`` the suffix is swapped to ``_lines.csv``; otherwise
+        ``_lines`` is appended before the extension. No lines → no sibling.
+        """
         if self.state.label_map is None:
             raise ValueError("no image loaded")
         io_manager.save_areas_csv(csv_path, self.compute_area_rows())
+        line_rows = self.compute_line_csv_rows()
+        if line_rows:
+            io_manager.save_lines_csv(_lines_csv_sibling(csv_path), line_rows)
