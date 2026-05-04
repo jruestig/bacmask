@@ -295,6 +295,30 @@ def test_load_bundle_restores_state(tmp_path):
     assert svc2.state.dirty is False
 
 
+def test_save_load_round_trips_measurement_lines(tmp_path):
+    """Lines drawn before save must be present after reload."""
+    svc = MaskService()
+    svc.load_image(_write_image(tmp_path))
+    svc.set_active_tool("line")
+    svc.begin_line((5, 5))
+    first = svc.commit_line((25, 5))
+    svc.begin_line((10, 10))
+    second = svc.commit_line((10, 30))
+    assert first == 1 and second == 2
+
+    bundle_p = tmp_path / "lines.bacmask"
+    svc.save_bundle(bundle_p)
+
+    svc2 = MaskService()
+    svc2.load_bundle(bundle_p)
+    assert set(svc2.state.lines) == {1, 2}
+    assert svc2.state.lines[1]["p1"] == (5, 5)
+    assert svc2.state.lines[1]["p2"] == (25, 5)
+    assert svc2.state.lines[2]["p1"] == (10, 10)
+    assert svc2.state.lines[2]["p2"] == (10, 30)
+    assert svc2.state.next_line_id == 3
+
+
 def test_id_stability_survives_save_load(tmp_path):
     """Deleted IDs stay reserved across a save/load round-trip."""
     svc = MaskService()

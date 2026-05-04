@@ -143,8 +143,8 @@ class MaskService:
         self.state.active_lasso = None
         self.state.active_brush_stroke = None
         self.state.selected_region_id = None
-        self.state.lines = {}
-        self.state.next_line_id = 1
+        self.state.lines = {int(k): dict(v) for k, v in bundle.meta.lines.items()}
+        self.state.next_line_id = bundle.meta.next_line_id
         self.state.active_line = None
         self.state.selected_line_id = None
         self.state.dirty = False
@@ -561,9 +561,9 @@ class MaskService:
         return "created"
 
     # ---- line measurement tool ---------------------------------------------
-    # Per-session measurement lines for hand-calibrating mm/px against a known
-    # scale bar. Not persisted in the bundle; not exported to CSV; not part of
-    # the undo/redo stack. State-only — clearing lines is a manual operation.
+    # Measurement lines for hand-calibrating mm/px against a known scale bar.
+    # Persisted in the bundle's meta.json (knowledge/015); not exported to CSV;
+    # not part of the undo/redo stack. Clearing lines is a manual operation.
 
     def begin_line(self, pos: tuple[int, int]) -> None:
         ix, iy = int(pos[0]), int(pos[1])
@@ -746,6 +746,8 @@ class MaskService:
             scale_mm_per_px=self.state.scale_mm_per_px,
             next_label_id=self.state.next_label_id,
             regions=dict(self.state.regions),
+            lines={k: dict(v) for k, v in self.state.lines.items()},
+            next_line_id=self.state.next_line_id,
         )
         io_manager.save_bundle_from_bytes(
             bundle_path,

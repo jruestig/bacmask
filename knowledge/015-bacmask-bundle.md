@@ -43,6 +43,10 @@ project.bacmask/
       "vertices": [[123, 45], [130, 50], [128, 58]]
     },
     "2": { "name": "region_02", "vertices": [[...]] }
+  },
+  "next_line_id": 2,
+  "lines": {
+    "1": { "name": "scale_bar", "p1": [10, 10], "p2": [110, 10] }
   }
 }
 ```
@@ -52,6 +56,7 @@ project.bacmask/
 - `scale_mm_per_px`: `null` when uncalibrated ([017](017-calibration-input.md)).
 - `next_label_id`: persisted so IDs stay stable across save/reload (see [014](014-lasso-tool.md) — ID stability).
 - `regions`: keys are label IDs as strings (JSON requirement); values hold auto-name and polygon vertices. Vertices are integer pixel coordinates in the source image's coordinate system.
+- `lines`: measurement lines drawn for hand-calibrating mm/px ([017](017-calibration-input.md)). Keys are line IDs as strings; values carry `name`, `p1`, `p2` (integer pixel coordinates). `next_line_id` parallels `next_label_id` so IDs stay monotonic across reloads. Both fields are optional — bundles written before this schema extension load with `lines = {}` and `next_line_id = 1`.
 
 ## What Save writes
 - `Save` (toolbar button, `Ctrl+S`) writes **only** the bundle. No CSV, no mask files.

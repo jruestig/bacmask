@@ -63,8 +63,9 @@ class SessionState:
     brush_default_mode: Literal["add", "subtract", "create"] = "add"
     # Per-stroke buffer. None when no brush stroke is in flight.
     active_brush_stroke: BrushStroke | None = None
-    # Measurement lines — per-session only, not persisted in the bundle and not
-    # exported to CSV. Shape: ``{line_id: {"name": str, "p1": (x, y), "p2": (x, y)}}``.
+    # Measurement lines — persisted in the bundle's meta.json (knowledge/015),
+    # not exported to CSV. Shape:
+    # ``{line_id: {"name": str, "p1": (x, y), "p2": (x, y)}}``.
     lines: dict[int, dict[str, Any]] = field(default_factory=dict)
     next_line_id: int = 1
     # In-progress line preview during drag — ``{"p1": (x, y), "p2": (x, y)}`` or

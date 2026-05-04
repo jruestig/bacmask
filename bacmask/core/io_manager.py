@@ -29,7 +29,7 @@ import csv
 import io
 import json
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -224,6 +224,12 @@ class BundleMeta:
     scale_mm_per_px: float | None
     next_label_id: int
     regions: dict[int, dict[str, Any]]
+    # Measurement lines (knowledge/017 calibration helper). Persisted alongside
+    # regions so a reloaded bundle restores the exact session — including the
+    # mm/px reference lines the user drew. Schema per line:
+    # ``{"name": str, "p1": [x, y], "p2": [x, y]}``. Empty dict when none.
+    lines: dict[int, dict[str, Any]] = field(default_factory=dict)
+    next_line_id: int = 1
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -269,6 +275,15 @@ def save_bundle_from_bytes(
         "next_label_id": meta.next_label_id,
         "regions": {
             str(k): {"name": v["name"], "vertices": v["vertices"]} for k, v in meta.regions.items()
+        },
+        "next_line_id": meta.next_line_id,
+        "lines": {
+            str(k): {
+                "name": v["name"],
+                "p1": [int(v["p1"][0]), int(v["p1"][1])],
+                "p2": [int(v["p2"][0]), int(v["p2"][1])],
+            }
+            for k, v in meta.lines.items()
         },
     }
 
@@ -330,12 +345,26 @@ def open_bundle(source: BundleSource) -> BundleContents:
         # v1 fallback: derive from the decoded image.
         image_shape = (int(image_arr.shape[0]), int(image_arr.shape[1]))
 
+    raw_lines = meta_json.get("lines") or {}
+    lines: dict[int, dict[str, Any]] = {}
+    for k, v in raw_lines.items():
+        p1 = v["p1"]
+        p2 = v["p2"]
+        lines[int(k)] = {
+            "name": v["name"],
+            "p1": (int(p1[0]), int(p1[1])),
+            "p2": (int(p2[0]), int(p2[1])),
+        }
+    next_line_id = int(meta_json.get("next_line_id", max(lines, default=0) + 1))
+
     meta = BundleMeta(
         source_filename=meta_json["source_filename"],
         image_shape=image_shape,
         scale_mm_per_px=meta_json.get("scale_mm_per_px"),
         next_label_id=meta_json["next_label_id"],
         regions={int(k): v for k, v in meta_json.get("regions", {}).items()},
+        lines=lines,
+        next_line_id=next_line_id,
         created_at=meta_json.get("created_at"),
         updated_at=meta_json.get("updated_at"),
     )

@@ -109,6 +109,58 @@ def test_bundle_v2_round_trip(tmp_path):
     ]
 
 
+def test_bundle_v2_round_trips_measurement_lines(tmp_path):
+    img_path = _write_synthetic_image(tmp_path)
+    lines = {
+        1: {"name": "scale_bar", "p1": (10, 10), "p2": (110, 10)},
+        2: {"name": "line_2", "p1": (5, 5), "p2": (5, 25)},
+    }
+    meta = iom.BundleMeta(
+        source_filename=img_path.name,
+        image_shape=(20, 30),
+        scale_mm_per_px=None,
+        next_label_id=1,
+        regions={},
+        lines=lines,
+        next_line_id=3,
+    )
+    bundle_path = tmp_path / "lines.bacmask"
+    iom.save_bundle(bundle_path, img_path, (20, 30), meta)
+
+    loaded = iom.load_bundle(bundle_path)
+    assert loaded.meta.next_line_id == 3
+    assert set(loaded.meta.lines) == {1, 2}
+    assert loaded.meta.lines[1]["name"] == "scale_bar"
+    assert loaded.meta.lines[1]["p1"] == (10, 10)
+    assert loaded.meta.lines[1]["p2"] == (110, 10)
+    assert loaded.meta.lines[2]["p1"] == (5, 5)
+    assert loaded.meta.lines[2]["p2"] == (5, 25)
+
+
+def test_bundle_without_lines_section_loads_as_empty(tmp_path):
+    """Bundles written before the lines field existed must still load."""
+    img_path = _write_synthetic_image(tmp_path)
+    p = tmp_path / "old.bacmask"
+    with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("image.png", img_path.read_bytes())
+        zf.writestr(
+            "meta.json",
+            json.dumps(
+                {
+                    "bacmask_version": iom.BACMASK_VERSION,
+                    "source_filename": img_path.name,
+                    "image_shape": [20, 30],
+                    "scale_mm_per_px": None,
+                    "next_label_id": 1,
+                    "regions": {},
+                }
+            ),
+        )
+    loaded = iom.load_bundle(p)
+    assert loaded.meta.lines == {}
+    assert loaded.meta.next_line_id == 1
+
+
 def test_bundle_v2_does_not_write_mask_png(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
     meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
