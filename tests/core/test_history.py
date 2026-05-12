@@ -1,4 +1,4 @@
-from bacmask.core.history import UndoRedoStack
+from biomask.core.history import UndoRedoStack
 
 
 class RecordingCmd:

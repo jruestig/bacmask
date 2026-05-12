@@ -1,7 +1,7 @@
 # Windows packaging
 
-Build a onefolder distribution of BacMask for Windows using PyInstaller.
-The resulting `dist/bacmask/` directory is self-contained — ship it zipped
+Build a onefolder distribution of BioMask for Windows using PyInstaller.
+The resulting `dist/biomask/` directory is self-contained — ship it zipped
 or wrap it with an Inno Setup installer (separate step, not included yet).
 
 ## Prerequisites (on a Windows host or `windows-latest` CI runner)
@@ -22,10 +22,10 @@ python -m pip install "kivy_deps.angle"
 From the repo root:
 
 ```powershell
-pyinstaller packaging\bacmask.spec
+pyinstaller packaging\biomask.spec
 ```
 
-Outputs `dist\bacmask\bacmask.exe` plus its sibling DLLs and data files.
+Outputs `dist\biomask\biomask.exe` plus its sibling DLLs and data files.
 
 ### Wrap into an installer (Inno Setup)
 
@@ -35,29 +35,29 @@ Install Inno Setup 6 (<https://jrsoftware.org/isdl.php>), then from the repo roo
 iscc packaging\installer.iss
 ```
 
-Outputs `dist\bacmask-setup-<ver>.exe`. By default the installer is per-user
+Outputs `dist\biomask-setup-<ver>.exe`. By default the installer is per-user
 (no admin prompt); users can opt into a machine-wide install via the privilege
 dialog. Three optional tasks are exposed in the wizard:
 
 - **Desktop shortcut** — off by default.
-- **Associate `.bacmask` files** — off by default. Double-click opens the
-  bundle via `bacmask.exe <path>` (argv handled in `main.py`).
-- **Add to image "Open with" menu** — off by default. Adds BacMask as a
+- **Associate `.bmsk` files** — off by default. Double-click opens the
+  bundle via `biomask.exe <path>` (argv handled in `main.py`).
+- **Add to image "Open with" menu** — off by default. Adds BioMask as a
   secondary handler for `.tif`, `.tiff`, `.png`, `.jpg`, `.jpeg`, `.bmp`
-  using `OpenWithProgids`. BacMask appears under right-click → *Open with*
+  using `OpenWithProgids`. BioMask appears under right-click → *Open with*
   but does **not** become the default — Photos / IrfanView / etc. stay in
   charge. Users can promote it to default themselves via Windows' "Choose
   another app → Always use this app" dialog.
 
-The installer does **not** delete `%LOCALAPPDATA%\BacMask` on uninstall —
+The installer does **not** delete `%LOCALAPPDATA%\BioMask` on uninstall —
 user bundles/CSVs are treated as user work, not install artifacts.
 
 ## Smoke test
 
-1. Run `dist\bacmask\bacmask.exe` on a machine without Python installed.
+1. Run `dist\biomask\biomask.exe` on a machine without Python installed.
 2. Load an image, trace a lasso, **Save** (`Ctrl+S`), **Export** (`Ctrl+E`).
-3. Verify outputs appear under `%LOCALAPPDATA%\BacMask\bundles\` and
-   `%LOCALAPPDATA%\BacMask\areas\`.
+3. Verify outputs appear under `%LOCALAPPDATA%\BioMask\bundles\` and
+   `%LOCALAPPDATA%\BioMask\areas\`.
 4. Confirm no console window opens.
 
 ## Paths
@@ -66,16 +66,16 @@ Installed builds write to a user-writable location, never `Program Files`:
 
 | Platform | Output root |
 |----------|-------------|
-| Windows  | `%LOCALAPPDATA%\BacMask` |
-| macOS    | `~/Library/Application Support/BacMask` |
-| Linux    | `$XDG_DATA_HOME/BacMask` (or `~/.local/share/BacMask`) |
+| Windows  | `%LOCALAPPDATA%\BioMask` |
+| macOS    | `~/Library/Application Support/BioMask` |
+| Linux    | `$XDG_DATA_HOME/BioMask` (or `~/.local/share/BioMask`) |
 | Dev run  | `./output` (repo-local) |
 
-Override with `BACMASK_OUTPUT_ROOT=<path>` (env var wins in all modes).
+Override with `BIOMASK_OUTPUT_ROOT=<path>` (env var wins in all modes).
 
 ## Icon
 
-Drop a multi-size `.ico` at `packaging/bacmask.ico` and rebuild — the spec
+Drop a multi-size `.ico` at `packaging/biomask.ico` and rebuild — the spec
 picks it up automatically. A plain 256×256 PNG won't do; use an `.ico`
 container with 16/32/48/256 px entries.
 
@@ -105,7 +105,7 @@ the matching GitHub Release.
 ## Known gaps (deferred)
 
 - No code signing — users will see SmartScreen warnings on first run.
-- No dedicated document icon for `.bacmask` — association uses the exe icon
+- No dedicated document icon for `.bmsk` — association uses the exe icon
   at index 0.
 
 ## Building on CI
@@ -113,13 +113,13 @@ the matching GitHub Release.
 `.github/workflows/windows-build.yml` runs the build on `windows-latest`.
 
 - **Manual build:** Actions tab → *windows-build* → *Run workflow*. Artifact
-  `bacmask-setup-<ver>.exe` attaches to the run (download requires GitHub
+  `biomask-setup-<ver>.exe` attaches to the run (download requires GitHub
   login + repo read).
 - **Release build:** push a tag matching `v*` (e.g.
   `uv run scripts/bump_version.py 0.0.6 --tag`). The workflow uploads the
   installer to the matching GitHub Release; on a public repo the asset is
   anonymously downloadable at
-  `https://github.com/<owner>/<repo>/releases/download/v<ver>/bacmask-setup-<ver>.exe`.
+  `https://github.com/<owner>/<repo>/releases/download/v<ver>/biomask-setup-<ver>.exe`.
 
 The workflow declares `permissions: contents: write` so the default
 `GITHUB_TOKEN` can publish Releases without a PAT.
@@ -140,12 +140,12 @@ understanding why they're there:
 - **No onefolder upload-artifact.** The installer already contains it, and
   uploading the raw onefolder zips thousands of small Kivy files serially —
   was the source of multiple 30-min job timeouts.
-- **`sys.setrecursionlimit(5000)`** in `bacmask.spec`. PyInstaller's
+- **`sys.setrecursionlimit(5000)`** in `biomask.spec`. PyInstaller's
   modulegraph walk exceeds the 1000 default on Kivy + numpy + cv2 stacks.
 
 ## Spec hookup (lessons learned)
 
-`packaging/bacmask.spec` uses Kivy's official helper to declare which
+`packaging/biomask.spec` uses Kivy's official helper to declare which
 subsystems to include:
 
 ```python
@@ -180,18 +180,18 @@ debug:
    "ignored" provider:
    ```cmd
    set KIVY_LOG_LEVEL=debug
-   "C:\Users\<name>\AppData\Local\Programs\BacMask\bacmask.exe"
+   "C:\Users\<name>\AppData\Local\Programs\BioMask\biomask.exe"
    ```
 3. **Inspect the install layout**:
    ```cmd
-   dir "C:\Users\<name>\AppData\Local\Programs\BacMask\_internal\kivy\core"
-   dir "C:\Users\<name>\AppData\Local\Programs\BacMask\_internal" | findstr /i "SDL2"
+   dir "C:\Users\<name>\AppData\Local\Programs\BioMask\_internal\kivy\core"
+   dir "C:\Users\<name>\AppData\Local\Programs\BioMask\_internal" | findstr /i "SDL2"
    ```
 4. **Console rebuild** — if the Kivy log is empty (process died before Kivy
    started, e.g. missing MSVC runtime), flip `console=False` → `console=True`
-   in `bacmask.spec`, rebuild, run from `cmd.exe`. Traceback prints directly.
+   in `biomask.spec`, rebuild, run from `cmd.exe`. Traceback prints directly.
 5. **Windows Event Viewer** — `eventvwr.msc` → *Windows Logs* →
-   *Application*. Filter on `Application Error` / `bacmask.exe`. Catches
+   *Application*. Filter on `Application Error` / `biomask.exe`. Catches
    DLL-load failures, access violations.
 
 ### Known runtime gotchas
@@ -201,14 +201,14 @@ debug:
   directory listing on Windows — PyInstaller can't see deferred imports
   inside function bodies. Fix is two-part and already applied: install
   `pywin32` in the workflow's deps step, and add `win32timezone` to
-  `hiddenimports` in `bacmask.spec`. Symptom is a traceback that ends in
+  `hiddenimports` in `biomask.spec`. Symptom is a traceback that ends in
   `kivy/uix/filechooser.py` line ~180; the file picker works on dev
   machines because Kivy or its deps pull pywin32 in transitively there.
 - **Non-ASCII image paths.** `cv2.imread()` on Windows uses ANSI Win32 file
   APIs and returns `None` for any path containing umlauts/accents/CJK — even
   on German Windows installs with paths like `Bilder\Größe.png`. Use
   `np.fromfile(p) → cv2.imdecode` instead. Already applied in
-  `bacmask/core/io_manager.py:load_image` and the bundle reader.
+  `biomask/core/io_manager.py:load_image` and the bundle reader.
 - **Same-version reinstall.** Inno Setup uses `ignoreversion` on `[Files]`
   so files do overwrite, but Kivy log files cached under `%USERPROFILE%\.kivy\logs`
   are not touched. If diagnosing, look at the **newest** log, not

@@ -13,8 +13,8 @@ No hardcoded paths, sizes, or colors. User-tweakable settings live in config.
 
 ## Layout
 - `config.yaml` at repo root — user-editable runtime config.
-- `bacmask/config/defaults.py` — default values as Python constants.
-- `bacmask/config/config_loader.py` — loads YAML, validates, falls back to defaults on missing keys.
+- `biomask/config/defaults.py` — default values as Python constants.
+- `biomask/config/config_loader.py` — loads YAML, validates, falls back to defaults on missing keys.
 
 ## What belongs in config
 - Default output paths (`output/masks/`, `output/areas/`).

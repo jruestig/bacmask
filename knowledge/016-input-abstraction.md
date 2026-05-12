@@ -12,7 +12,7 @@ related: [001, 010, 014, 020, 031, 036]
 Decouple gesture/input handling from domain commands so desktop ↔ touch profiles can be swapped without touching core or services.
 
 ## Decision
-All raw gestures are translated into a small vocabulary of **semantic input events** at `bacmask/ui/input/`. Widgets and services consume the semantic events — they never see raw Kivy events.
+All raw gestures are translated into a small vocabulary of **semantic input events** at `biomask/ui/input/`. Widgets and services consume the semantic events — they never see raw Kivy events.
 
 ## Semantic events (MVP)
 - `PointerDown(pos, is_double=False)` — no `modifiers` field. The brush model ([026](026-brush-edit-model.md)) used to consume modifier state at press-down via Kivy's `Window.modifiers`, but that plumbing was removed when the brush switched to a persistent toggle (Add / Subtract / Create) cycled with `Tab`.
@@ -27,7 +27,7 @@ All raw gestures are translated into a small vocabulary of **semantic input even
   - Left-drag → pointer sequence.
   - Middle-drag → `Pan`.
   - Wheel → `Zoom`.
-- **Window-level keyboard** is handled directly by `BacMaskApp._on_key_down`, which calls `keybinding_for(key, modifiers)` (the lookup table below) and forwards the resolved name to `BacMaskApp.dispatch_action(name)` — the single dispatcher (see [036](036-single-action-dispatcher.md)). Kivy delivers key events to `Window`, not to widgets, so a per-widget keyboard adapter would be unreachable.
+- **Window-level keyboard** is handled directly by `BioMaskApp._on_key_down`, which calls `keybinding_for(key, modifiers)` (the lookup table below) and forwards the resolved name to `BioMaskApp.dispatch_action(name)` — the single dispatcher (see [036](036-single-action-dispatcher.md)). Kivy delivers key events to `Window`, not to widgets, so a per-widget keyboard adapter would be unreachable.
 - Keybindings (resolved by `keybinding_for`):
   - `Enter` → `"close_lasso"`.
   - `Escape` → `"cancel_stroke"` — cancels whichever stroke is in flight (lasso, brush, or line).

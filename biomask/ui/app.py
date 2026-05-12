@@ -16,14 +16,15 @@ from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
-from bacmask.core.state import SessionState
-from bacmask.services.mask_service import MaskService
-from bacmask.ui.input.desktop_adapter import keybinding_for
-from bacmask.ui.screens.main_screen import MainScreen
+from biomask.core.io_manager import BUNDLE_EXT, is_bundle_suffix
+from biomask.core.state import SessionState
+from biomask.services.mask_service import MaskService
+from biomask.ui.input.desktop_adapter import keybinding_for
+from biomask.ui.screens.main_screen import MainScreen
 
 
-class BacMaskApp(App):
-    title = "BacMask"
+class BioMaskApp(App):
+    title = "BioMask"
 
     def __init__(self, initial_path: Path | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -46,7 +47,7 @@ class BacMaskApp(App):
 
     def _load_path(self, path: Path) -> None:
         try:
-            if path.suffix.lower() == ".bacmask":
+            if is_bundle_suffix(path.suffix):
                 self.service.load_bundle(path)
             else:
                 self.service.load_image(path)
@@ -210,6 +211,7 @@ class BacMaskApp(App):
                 "*.tiff",
                 "*.TIFF",
                 "*.bmp",
+                "*.bmsk",
                 "*.bacmask",
             ],
         )
@@ -233,7 +235,7 @@ class BacMaskApp(App):
                 return
             path = Path(chooser.selection[0])
             try:
-                if path.suffix.lower() == ".bacmask":
+                if is_bundle_suffix(path.suffix):
                     self.service.load_bundle(path)
                 else:
                     self.service.load_image(path)
@@ -263,8 +265,8 @@ class BacMaskApp(App):
         start_dir = _image_dir(state) or Path.cwd()
 
         def do_save(out_path: Path) -> None:
-            if out_path.suffix.lower() != ".bacmask":
-                out_path = out_path.with_suffix(".bacmask")
+            if out_path.suffix.lower() != BUNDLE_EXT:
+                out_path = out_path.with_suffix(BUNDLE_EXT)
             try:
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 self.service.save_bundle(out_path)
@@ -275,7 +277,7 @@ class BacMaskApp(App):
         self._open_save_as_dialog(
             title="Save Bundle As",
             start_dir=start_dir,
-            default_filename=f"{stem}.bacmask",
+            default_filename=f"{stem}{BUNDLE_EXT}",
             on_confirm=do_save,
         )
 
@@ -421,7 +423,7 @@ def _image_dir(state: SessionState) -> Path | None:
     return parent if parent.is_dir() else None
 
 
-def _popup(text: str, title: str = "BacMask") -> None:
+def _popup(text: str, title: str = "BioMask") -> None:
     Popup(title=title, content=Label(text=text), size_hint=(0.6, 0.35)).open()
 
 
@@ -474,4 +476,4 @@ def _set_chooser_path(chooser: FileChooserListView, target: str) -> None:
 
 
 def main(initial_path: Path | None = None) -> None:
-    BacMaskApp(initial_path=initial_path).run()
+    BioMaskApp(initial_path=initial_path).run()

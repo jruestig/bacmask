@@ -13,16 +13,16 @@ One action vocabulary. One dispatcher. App-level.
 
 ## Decision
 
-`BacMaskApp.dispatch_action(name: str) -> bool` is the only place semantic action names turn into service calls. Both producers route through it:
+`BioMaskApp.dispatch_action(name: str) -> bool` is the only place semantic action names turn into service calls. Both producers route through it:
 
-1. **Window keyboard** — `BacMaskApp._on_key_down` resolves Kivy key + modifiers via `keybinding_for(...)`, then calls `dispatch_action`.
-2. **Canvas pointer/touch** — `ImageCanvas` receives `Action(name=...)` events from its `DesktopInputAdapter`, forwards them via the `on_action` callback wired through `MainScreen.__init__` from `BacMaskApp.dispatch_action`.
+1. **Window keyboard** — `BioMaskApp._on_key_down` resolves Kivy key + modifiers via `keybinding_for(...)`, then calls `dispatch_action`.
+2. **Canvas pointer/touch** — `ImageCanvas` receives `Action(name=...)` events from its `DesktopInputAdapter`, forwards them via the `on_action` callback wired through `MainScreen.__init__` from `BioMaskApp.dispatch_action`.
 
 The canvas no longer dispatches anything itself.
 
 ## Why
 
-Pre-refactor: two dispatchers — `BacMaskApp._run_action` (window keyboard) and `ImageCanvas._handle_action` (canvas Action events). Overlap on every action except `save_bundle` / `export_csv` / `load_image` / `pan_*`. Drift hazard:
+Pre-refactor: two dispatchers — `BioMaskApp._run_action` (window keyboard) and `ImageCanvas._handle_action` (canvas Action events). Overlap on every action except `save_bundle` / `export_csv` / `load_image` / `pan_*`. Drift hazard:
 
 - `cancel_stroke` cleared `_brush_preview_pts` only in the canvas dispatcher. A future Esc fired through the window path would have left the brush ghost on screen — narrowly avoided today only because window keyboard never reached the canvas dispatcher.
 - New action = edit two places, remember both.
@@ -46,11 +46,11 @@ Cleanup fires whenever the stroke ends — commit, cancel, or subtract-empties-d
 ## Wiring
 
 ```
-BacMaskApp.build()
+BioMaskApp.build()
   └─ MainScreen(..., on_action=self.dispatch_action)
         └─ ImageCanvas(service, on_action=on_action)
 
-Window.on_key_down ─▶ BacMaskApp._on_key_down ─▶ keybinding_for ─▶ dispatch_action
+Window.on_key_down ─▶ BioMaskApp._on_key_down ─▶ keybinding_for ─▶ dispatch_action
 DesktopInputAdapter ─▶ canvas._on_input(Action) ─▶ self._on_action(name) ─▶ dispatch_action
 ```
 
@@ -66,14 +66,14 @@ Total `pytest`: 225 → 226, all pass.
 
 ## Files changed
 
-- `bacmask/ui/app.py` — `_run_action` → `dispatch_action` (public); pass to `MainScreen`.
-- `bacmask/ui/screens/main_screen.py` — `on_action` parameter forwarded to `ImageCanvas`.
-- `bacmask/ui/widgets/image_canvas.py` — `on_action` constructor kwarg; `_handle_action` deleted; brush-preview cleanup moved into `_on_state_changed`.
-- `bacmask/ui/input/desktop_adapter.py` — dead `on_key_down` deleted; module docstring + class docstring updated to reflect mouse-only adapter.
+- `biomask/ui/app.py` — `_run_action` → `dispatch_action` (public); pass to `MainScreen`.
+- `biomask/ui/screens/main_screen.py` — `on_action` parameter forwarded to `ImageCanvas`.
+- `biomask/ui/widgets/image_canvas.py` — `on_action` constructor kwarg; `_handle_action` deleted; brush-preview cleanup moved into `_on_state_changed`.
+- `biomask/ui/input/desktop_adapter.py` — dead `on_key_down` deleted; module docstring + class docstring updated to reflect mouse-only adapter.
 
 ## Why not a per-widget keyboard adapter
 
-Considered: instantiate a `DesktopInputAdapter` inside `BacMaskApp` purely for keyboard, sharing translation with the canvas. Rejected — extra wiring for zero new capability. `keybinding_for` is already a free function both call sites can use; the adapter class is for stateful pointer drag tracking, which the window-keyboard path does not need.
+Considered: instantiate a `DesktopInputAdapter` inside `BioMaskApp` purely for keyboard, sharing translation with the canvas. Rejected — extra wiring for zero new capability. `keybinding_for` is already a free function both call sites can use; the adapter class is for stateful pointer drag tracking, which the window-keyboard path does not need.
 
 ## Related
 

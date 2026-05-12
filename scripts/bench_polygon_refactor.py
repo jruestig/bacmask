@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from bacmask.services.mask_service import MaskService
+from biomask.services.mask_service import MaskService
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 IMAGES_DIR = REPO_ROOT / "images"
@@ -118,7 +118,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
-        bundle = tmp_path / "bench.bacmask"
+        bundle = tmp_path / "bench.bmsk"
         csv = tmp_path / "bench_areas.csv"
         timer.run("save_bundle", lambda: svc.save_bundle(bundle))
         timer.run("export_csv", lambda: svc.export_csv(csv))

@@ -3,14 +3,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from bacmask.ui.input.desktop_adapter import (
+from biomask.ui.input.desktop_adapter import (
     DEFAULT_KEYBINDINGS,
     DesktopInputAdapter,
     button_label,
     keybinding_for,
     label_for_action,
 )
-from bacmask.ui.input.events import (
+from biomask.ui.input.events import (
     Action,
     Pan,
     PointerDown,

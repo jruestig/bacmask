@@ -9,7 +9,7 @@ related: [002, 012, 015, 023, 025]
 
 # Mask Export (deferred, Python-only)
 
-Masks are no longer stored inside `.bacmask` bundles. Polygons are canonical (see [002](002-state-management.md), [015](015-bacmask-bundle.md)). Producing raster masks for downstream training is a **separate, headless, on-demand operation** — out of scope for the MVP UI.
+Masks are no longer stored inside `.bmsk` bundles. Polygons are canonical (see [002](002-state-management.md), [015](015-biomask-bundle.md)). Producing raster masks for downstream training is a **separate, headless, on-demand operation** — out of scope for the MVP UI.
 
 This note locks the format contract so when the exporter is built it lands in a predictable shape.
 
@@ -20,7 +20,7 @@ This note locks the format contract so when the exporter is built it lands in a 
 - Is a **pure Python function** callable from a script, notebook, or future CLI. No dependency on `MaskService`, `kivy`, or any widget.
 
 ## Placement (when implemented)
-`bacmask/services/mask_export.py` — fits the services layer ([001](001-separation-of-concerns.md)). A future CLI wrapper can live in `bacmask/cli/` without touching the UI.
+`biomask/services/mask_export.py` — fits the services layer ([001](001-separation-of-concerns.md)). A future CLI wrapper can live in `biomask/cli/` without touching the UI.
 
 ## Signature
 
@@ -28,14 +28,14 @@ This note locks the format contract so when the exporter is built it lands in a 
 def export_masks(bundle_path: Path, out_dir: Path) -> ExportResult: ...
 ```
 
-- `bundle_path`: existing `.bacmask` file.
+- `bundle_path`: existing `.bmsk` file.
 - `out_dir`: directory to write into. Created if missing.
 - Returns a small dataclass: layer count, per-layer label-id lists, manifest path.
 
 No UI callback, no observer, no side effects beyond the filesystem.
 
 ## Output layout
-For a bundle `plate_42.bacmask`:
+For a bundle `plate_42.bmsk`:
 
 ```
 <out_dir>/plate_42_masks/
@@ -59,7 +59,7 @@ For a bundle `plate_42.bacmask`:
 
 ```json
 {
-  "bacmask_version": 2,
+  "biomask_version": 2,
   "image_filename": "plate_42.tif",
   "image_shape": [1024, 1024],
   "scale_mm_per_px": 0.0125,
@@ -93,7 +93,7 @@ Typical colony image: 1 layer. Occasional two-region overlap: 2 layers. Rare tri
 ## Not in MVP
 - UI wiring (no button).
 - User-specified `out_dir` via a file picker.
-- CLI wrapper (`bacmask-export-masks`).
+- CLI wrapper (`biomask-export-masks`).
 - Alternate formats (PNG, TIFF, NPZ, multi-channel HDF5).
 - Batch mode over directories.
 - Streaming / chunked writes for giant images.
@@ -101,7 +101,7 @@ Typical colony image: 1 layer. Occasional two-region overlap: 2 layers. Rare tri
 All of these are straightforward additions on top of the pure function when the need arises.
 
 ## Related
-- [015 — .bacmask Bundle Format](015-bacmask-bundle.md) — bundle is the exporter's input.
+- [015 — .bmsk Bundle Format](015-biomask-bundle.md) — bundle is the exporter's input.
 - [002 — State Management](002-state-management.md) — polygons canonical.
 - [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) — the editing model that allows overlaps.
 - [012 — 16-bit PNG Label Maps](superseded/012-png-label-maps.md) — superseded; explains why PNG was the original choice and why `.npy` is better for the deferred, headless use case.

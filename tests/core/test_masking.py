@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from bacmask.core import masking
+from biomask.core import masking
 
 
 def test_rasterize_polygon_mask_rectangle_fills_interior():

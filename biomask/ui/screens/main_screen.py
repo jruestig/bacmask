@@ -13,11 +13,11 @@ from typing import Any
 
 from kivy.uix.boxlayout import BoxLayout
 
-from bacmask.services.mask_service import MaskService
-from bacmask.ui.widgets.brush_panel import BrushPanel
-from bacmask.ui.widgets.image_canvas import ImageCanvas
-from bacmask.ui.widgets.results_table import ResultsTable
-from bacmask.ui.widgets.toolbar import Toolbar
+from biomask.services.mask_service import MaskService
+from biomask.ui.widgets.brush_panel import BrushPanel
+from biomask.ui.widgets.image_canvas import ImageCanvas
+from biomask.ui.widgets.results_table import ResultsTable
+from biomask.ui.widgets.toolbar import Toolbar
 
 
 class MainScreen(BoxLayout):

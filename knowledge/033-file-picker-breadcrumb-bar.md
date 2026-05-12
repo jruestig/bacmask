@@ -31,7 +31,7 @@ Asked the user; they explicitly chose breadcrumbs. Pros: one-click jump to any a
 
 ## Implementation pointer
 
-`bacmask/ui/app.py`:
+`biomask/ui/app.py`:
 
 - `_make_path_bar(chooser)` — builds the `ScrollView` + `BoxLayout` + per-segment `Button`s. Binds `chooser.path` to a local `rebuild` closure so navigation from any source refreshes the bar.
 - `_set_chooser_path(chooser, target)` — guarded `chooser.path = target` (no-op if `target` no longer exists, e.g. a folder deleted out-of-band between dialog open and click).

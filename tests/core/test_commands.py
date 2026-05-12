@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-from bacmask.core.commands import (
+from biomask.core.commands import (
     BrushStrokeCommand,
     DeleteRegionCommand,
     LassoCloseCommand,
 )
-from bacmask.core.state import SessionState
+from biomask.core.state import SessionState
 
 
 def _state(h: int = 50, w: int = 50) -> SessionState:

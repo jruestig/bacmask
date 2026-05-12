@@ -1,17 +1,17 @@
-"""BacMask entry point. Bootstraps logging + launches the Kivy app."""
+"""BioMask entry point. Bootstraps logging + launches the Kivy app."""
 
 import sys
 from pathlib import Path
 
-from bacmask.ui.app import main
-from bacmask.utils.logger import setup_logging
+from biomask.ui.app import main
+from biomask.utils.logger import setup_logging
 
 
 def _initial_path() -> Path | None:
     """Return argv[1] as a Path if it exists, else None.
 
-    Used for Windows double-click via the ``.bacmask`` file association,
-    and for the ``bacmask <path>`` CLI shortcut.
+    Used for Windows double-click via the ``.bmsk`` file association,
+    and for the ``biomask <path>`` CLI shortcut.
     """
     if len(sys.argv) < 2:
         return None

@@ -21,9 +21,9 @@ Exactly one tool is active at a time. The user switches via the toolbar or hotke
 Supporting global actions:
 - **Undo / redo** ([003](003-undo-redo-commands.md))
 - **Delete region**
-- **Save** — writes the `.bacmask` bundle only ([015](015-bacmask-bundle.md)). No masks, no CSV.
+- **Save** — writes the `.bmsk` bundle only ([015](015-biomask-bundle.md)). No masks, no CSV.
 - **Export** — writes the sibling areas CSV ([011](011-csv-for-area-output.md)). Separate button, user-invoked.
-- **Load** — reads an image or a `.bacmask` bundle. Double-click on a file opens it ([028](028-file-picker-double-click.md)).
+- **Load** — reads an image or a `.bmsk` bundle. Double-click on a file opens it ([028](028-file-picker-double-click.md)).
 - **Calibration input** ([017](017-calibration-input.md))
 
 Every button surfaces its keyboard shortcut in its label ([027](027-toolbar-hotkey-labels.md)).
@@ -47,7 +47,7 @@ Lasso handles "I'm outlining a new colony" — a continuous-trace gesture. Brush
 The brush can also create regions (in `create` mode). The lasso is still the right tool for outline-trace creation (you draw a boundary, get exactly that shape); the brush-create flow is for "paint a blob" creation where the user thinks in terms of filled area rather than a closed curve. Both pipelines end in the same `LassoCloseCommand` after the largest-CC + contour cleanup.
 
 ### Scope discipline protects the project
-Every additional tool (threshold, watershed, magic select, smart edge) pulls the product toward "general image editor" — which BacMask is explicitly **not**. Adding tools is a one-way door. Brush is allowed because it directly serves the boundary-refinement use case that the lasso-edit gesture failed at; no other tool gets that justification yet.
+Every additional tool (threshold, watershed, magic select, smart edge) pulls the product toward "general image editor" — which BioMask is explicitly **not**. Adding tools is a one-way door. Brush is allowed because it directly serves the boundary-refinement use case that the lasso-edit gesture failed at; no other tool gets that justification yet.
 
 ## Explicitly NOT in MVP
 - Eraser as a separate tool — brush in `subtract` mode already does this.

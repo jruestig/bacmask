@@ -11,7 +11,7 @@ related: [000, 005, 011, 015, 018, 024, 025]
 # 16-bit PNG Label Maps (superseded)
 
 > **Superseded by [024 — Mask Export (deferred, Python-only)](../024-mask-export-deferred.md)** and [025 — Overlapping Regions Allowed](../025-overlapping-regions.md).
-> A single PNG label map cannot represent overlapping regions ([025](../025-overlapping-regions.md)), and mask persistence has been removed from the `.bacmask` bundle ([015](../015-bacmask-bundle.md)). Raster mask output is now a deferred, headless `.npy` export ([024](../024-mask-export-deferred.md)). This note is retained for the rationale behind the original choice and for the decision record.
+> A single PNG label map cannot represent overlapping regions ([025](../025-overlapping-regions.md)), and mask persistence has been removed from the `.bmsk` bundle ([015](../015-biomask-bundle.md)). Raster mask output is now a deferred, headless `.npy` export ([024](../024-mask-export-deferred.md)). This note is retained for the rationale behind the original choice and for the decision record.
 
 ## Decision (historical)
 Masks serialized as **16-bit grayscale PNG**. One file per image, named `<image_stem>_mask.png`, written to `output/masks/`.
@@ -28,10 +28,10 @@ PNG is lossless. Any other format (JPEG especially) would silently corrupt label
 PyTorch, TensorFlow, Keras, and monai all load 16-bit PNGs directly via PIL/imageio without conversion. Segmentation training pipelines expect exactly this format.
 
 ### Widely supported
-Every OS, every image viewer, every language. If the user ever abandons BacMask, their masks remain portable.
+Every OS, every image viewer, every language. If the user ever abandons BioMask, their masks remain portable.
 
 ## Metadata policy: stateless PNG
-The mask PNG is **stateless** — no `tEXt`/`iTXt` chunks, no alpha-channel metadata tricks. Scale factor, source filename, region names, and polygon vertices live in the `.bacmask` bundle's `meta.json` ([015](../015-bacmask-bundle.md)) and in the sibling CSV ([011](../011-csv-for-area-output.md)).
+The mask PNG is **stateless** — no `tEXt`/`iTXt` chunks, no alpha-channel metadata tricks. Scale factor, source filename, region names, and polygon vertices live in the `.bmsk` bundle's `meta.json` ([015](../015-biomask-bundle.md)) and in the sibling CSV ([011](../011-csv-for-area-output.md)).
 
 Rationale: a stateless PNG remains a pure training-data artifact — any ML pipeline loads it directly without stripping custom chunks first.
 
@@ -47,6 +47,6 @@ Rationale: a stateless PNG remains a pure training-data artifact — any ML pipe
 
 ## Related
 - [011 — CSV for Area Output](../011-csv-for-area-output.md) — the paired human-readable output.
-- [015 — .bacmask Bundle](../015-bacmask-bundle.md) — container the mask lives inside.
+- [015 — .bmsk Bundle](../015-biomask-bundle.md) — container the mask lives inside.
 - [018 — Load Mask Dimension Mismatch](018-load-mask-dim-mismatch.md) — loading contract (also superseded).
 - [005 — Testing Strategy](../005-testing-strategy.md) — round-trip test requirement.

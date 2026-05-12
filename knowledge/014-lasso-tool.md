@@ -51,11 +51,11 @@ Older bundles and CSVs computed `area_px` as `mask.sum()` after `cv2.fillPoly` w
 ## ID stability (load-bearing)
 - IDs are assigned monotonically: 1, 2, 3, …
 - Deleting region 2 does **not** shift later IDs down — the gap persists.
-- `next_label_id` is persisted in the `.bacmask` bundle ([015](015-bacmask-bundle.md)) so reloading continues the sequence.
+- `next_label_id` is persisted in the `.bmsk` bundle ([015](015-biomask-bundle.md)) so reloading continues the sequence.
 - Rationale: external references (notes, downstream scripts, the user's own memory) stay valid across sessions. Reassignment would silently corrupt that.
 
 ## Vertex persistence
-- The **per-region vertex list** is the canonical representation ([030](030-polygons-are-mask-truth.md)) and persists in the bundle's `meta.json` ([015](015-bacmask-bundle.md)). Nothing else mask-shaped is stored — the mask export for training data is a separate, deferred operation ([024](024-mask-export-deferred.md)).
+- The **per-region vertex list** is the canonical representation ([030](030-polygons-are-mask-truth.md)) and persists in the bundle's `meta.json` ([015](015-biomask-bundle.md)). Nothing else mask-shaped is stored — the mask export for training data is a separate, deferred operation ([024](024-mask-export-deferred.md)).
 
 ## Commands (see [003](003-undo-redo-commands.md))
 - `LassoCloseCommand(vertices)` — add region. Stores only the vertex list; no mask snapshot.
@@ -79,7 +79,7 @@ Older bundles and CSVs computed `area_px` as `mask.sum()` after `cv2.fillPoly` w
 ## Related
 - [013 — Minimal Toolset](013-minimal-toolset.md) — updated scope lock.
 - [003 — Undo/Redo](003-undo-redo-commands.md) — command structure.
-- [015 — .bacmask Bundle](015-bacmask-bundle.md) — where vertex data persists.
+- [015 — .bmsk Bundle](015-biomask-bundle.md) — where vertex data persists.
 - [016 — Input Abstraction Layer](016-input-abstraction.md) — gesture delivery.
 - [026 — Brush Edit Model](026-brush-edit-model.md) — the editing tool (replaces the old edit-mode stroke).
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — invariant change; no clip rule.

@@ -11,10 +11,10 @@ os.environ.setdefault("KIVY_GL_BACKEND", "mock")
 
 import numpy as np  # noqa: E402
 
-from bacmask.core import masking  # noqa: E402
-from bacmask.services.mask_service import MaskService  # noqa: E402
-from bacmask.ui.input.events import PointerDown, PointerMove, PointerUp  # noqa: E402
-from bacmask.ui.widgets.image_canvas import ImageCanvas  # noqa: E402
+from biomask.core import masking  # noqa: E402
+from biomask.services.mask_service import MaskService  # noqa: E402
+from biomask.ui.input.events import PointerDown, PointerMove, PointerUp  # noqa: E402
+from biomask.ui.widgets.image_canvas import ImageCanvas  # noqa: E402
 
 
 def _service_with_region(img_w: int = 50, img_h: int = 50) -> MaskService:
@@ -71,7 +71,7 @@ def _widget_pos_for_image_pixel(
 ) -> tuple[float, float]:
     """Given an image pixel (x, y), compute the Kivy window-space (x, y) that
     maps back to it via the canvas' coord functions."""
-    from bacmask.utils import image_utils
+    from biomask.utils import image_utils
 
     wx, wy = image_utils.image_to_display_view(
         (float(image_xy[0]), float(image_xy[1])),
@@ -215,7 +215,7 @@ def test_cancel_brush_stroke_clears_canvas_preview_via_state_subscription():
     assert c._brush_preview_pts == [(15, 15)]
 
     # Simulate window-keyboard ``cancel_stroke`` — the same call
-    # ``BacMaskApp.dispatch_action("cancel_stroke")`` makes when the brush
+    # ``BioMaskApp.dispatch_action("cancel_stroke")`` makes when the brush
     # stroke is in flight.
     svc.cancel_brush_stroke()
 

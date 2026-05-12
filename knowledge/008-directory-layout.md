@@ -13,9 +13,9 @@ related: [001, 002, 003, 005, 006, 007, 009, 014, 015, 016, 019, 035]
 This supersedes the simpler sketch in `CLAUDE.md` where the two conflict. See [009](009-deviations-from-claudemd.md).
 
 ```
-bacmask/
+biomask/
 ├── main.py                         # entry point only — bootstraps app
-├── bacmask/
+├── biomask/
 │   ├── core/                       # NO UI IMPORTS (see 001)
 │   │   ├── state.py                # SessionState (see 002)
 │   │   ├── masking.py              # polygon rasterization, label assignment
@@ -44,7 +44,7 @@ bacmask/
 │   │   │   ├── results_table.py
 │   │   │   └── file_dialogs.py
 │   │   └── styles/
-│   │       └── bacmask.kv
+│   │       └── biomask.kv
 │   ├── config/                     # see 006
 │   │   ├── defaults.py
 │   │   └── config_loader.py
@@ -53,7 +53,7 @@ bacmask/
 │       └── logger.py               # see 007
 ├── images/                         # real microscopy TIFFs (manual smoke tests)
 ├── output/                         # user-configurable root (see 006)
-│   ├── bundles/                    # <image_stem>.bacmask  (see 015)
+│   ├── bundles/                    # <image_stem>.bmsk  (see 015)
 │   └── areas/                      # <image_stem>_areas.csv (see 011)
 ├── tests/                          # see 005
 │   ├── core/
@@ -79,14 +79,14 @@ bacmask/
 
 ## Naming rules
 - Packages and modules: `snake_case`.
-- Test files mirror source tree: `bacmask/core/masking.py` ↔ `tests/core/test_masking.py`.
-- Output files deterministic: `<image_stem>.bacmask`, `<image_stem>_areas.csv`.
+- Test files mirror source tree: `biomask/core/masking.py` ↔ `tests/core/test_masking.py`.
+- Output files deterministic: `<image_stem>.bmsk`, `<image_stem>_areas.csv`.
 
 ## Changes from earlier drafts
 - `requirements.txt` + `requirements-dev.txt` → replaced by `pyproject.toml` + `uv.lock` ([019](019-dev-tooling.md)).
 - `ui/widgets/brush_settings.py` removed — no brush in MVP ([013](013-minimal-toolset.md), [014](014-lasso-tool.md)).
 - `ui/widgets/toolbar.py` now lists lasso / undo / redo / delete / save.
-- `output/masks/` → `output/bundles/` — mask PNGs live inside `.bacmask` rather than standalone ([015](015-bacmask-bundle.md)).
+- `output/masks/` → `output/bundles/` — mask PNGs live inside `.bmsk` rather than standalone ([015](015-biomask-bundle.md)).
 - Added `ui/input/` for semantic input adapters ([016](016-input-abstraction.md)).
 - `io_manager.py` split into source carriers (`ImageSource`, `BundleSource`) + pure decoders (`decode_image`, `open_bundle`) + path shims ([035](035-io-source-carriers.md)). No new module — same file, two layers.
 

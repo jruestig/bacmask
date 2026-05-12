@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from bacmask.config import defaults
+from biomask.config import defaults
 
 Tool = Literal["lasso", "brush", "line"]
 

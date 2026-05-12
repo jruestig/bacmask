@@ -16,7 +16,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 
-from bacmask.services.mask_service import MaskService
+from biomask.services.mask_service import MaskService
 
 
 class ResultsTable(BoxLayout):

@@ -10,7 +10,7 @@ related: [002, 011, 015]
 # Calibration Input Model
 
 ## Canonical storage: mm per pixel
-`SessionState.scale_mm_per_px` ([002](002-state-management.md)) is the single source of truth. Persisted to the bundle's `meta.json` ([015](015-bacmask-bundle.md)) and written to the CSV `scale_factor` column ([011](011-csv-for-area-output.md)).
+`SessionState.scale_mm_per_px` ([002](002-state-management.md)) is the single source of truth. Persisted to the bundle's `meta.json` ([015](015-biomask-bundle.md)) and written to the CSV `scale_factor` column ([011](011-csv-for-area-output.md)).
 
 ## Input UX: two synced fields
 Both are visible simultaneously — no mode toggle, no dropdown:
@@ -31,7 +31,7 @@ Rationale: different users think in different directions. Objective specs often 
 ## Uncalibrated state
 - `scale_mm_per_px = None`. `area_px` still populated in the table and CSV.
 - CSV `area_mm2` and `scale_factor` columns are **empty strings** ([011](011-csv-for-area-output.md)).
-- Bundle `meta.json` stores `scale_mm_per_px: null` ([015](015-bacmask-bundle.md)).
+- Bundle `meta.json` stores `scale_mm_per_px: null` ([015](015-biomask-bundle.md)).
 
 ## Changing the scale mid-session
 - Allowed. Area column recomputes immediately on any commit.
@@ -47,4 +47,4 @@ User draws a line on the image, enters its real-world length in mm → derives m
 ## Related
 - [002 — Session State](002-state-management.md).
 - [011 — CSV for Area Output](011-csv-for-area-output.md).
-- [015 — .bacmask Bundle](015-bacmask-bundle.md).
+- [015 — .bmsk Bundle](015-biomask-bundle.md).

@@ -1,6 +1,6 @@
 ---
 id: 015
-title: .bacmask Bundle Format
+title: .bmsk Bundle Format
 tags: [architecture, core]
 created: 2026-04-17
 updated: 2026-05-04
@@ -8,17 +8,17 @@ status: accepted
 related: [011, 014, 017, 024, 025, 032, 035]
 ---
 
-# .bacmask Bundle Format
+# .bmsk Bundle Format
 
 Primary project save artifact. Self-contained editor state — everything needed to resume annotation. Masks are **not** stored inside the bundle; polygons are the canonical truth ([025](025-overlapping-regions.md)). Raster export for downstream training is a separate, on-demand operation ([024](024-mask-export-deferred.md)).
 
 ## Container
-A **ZIP archive** with extension `.bacmask`. Uses Python's stdlib `zipfile` — zero extra deps.
+A **ZIP archive** with extension `.bmsk`. Uses Python's stdlib `zipfile` — zero extra deps.
 
 ## Contents (v2)
 
 ```
-project.bacmask/
+project.bmsk/
 ├── image.<ext>      # original image, preserved byte-for-byte
 └── meta.json        # session metadata (schema below)
 ```
@@ -26,11 +26,11 @@ project.bacmask/
 - `image.<ext>` keeps its source extension (`.tif`, `.png`, `.jpg`, …) and byte contents — no re-encoding.
 - No raster mask. The polygon list in `meta.json` is the source of truth; the in-memory label map is a derived display cache ([002](002-state-management.md)).
 
-## meta.json schema (bacmask_version 2)
+## meta.json schema (biomask_version 2)
 
 ```json
 {
-  "bacmask_version": 2,
+  "biomask_version": 2,
   "source_filename": "20251112093808947.tif",
   "image_shape": [2048, 2048],
   "created_at": "2026-04-17T15:42:11Z",
@@ -51,7 +51,7 @@ project.bacmask/
 }
 ```
 
-- `bacmask_version`: int. **v2** drops the `mask.png` entry and makes polygons canonical. v1 bundles remain readable (see Back-compat below).
+- `biomask_version`: int. **v2** drops the `mask.png` entry and makes polygons canonical. v1 bundles remain readable (see Back-compat below).
 - `image_shape`: `[H, W]` of the source image. Used to rasterize polygons on load and to validate exports; cheap sanity check.
 - `scale_mm_per_px`: `null` when uncalibrated ([017](017-calibration-input.md)).
 - `next_label_id`: persisted so IDs stay stable across save/reload (see [014](014-lasso-tool.md) — ID stability).
@@ -60,7 +60,7 @@ project.bacmask/
 
 ## What Save writes
 - `Save` (toolbar button, `Ctrl+S`) writes **only** the bundle. No CSV, no mask files.
-- One file per image: `<image_stem>.bacmask`. Path is user-chosen via a Save As dialog ([032](032-save-as-dialog.md)) — no fixed output directory.
+- One file per image: `<image_stem>.bmsk`. Path is user-chosen via a Save As dialog ([032](032-save-as-dialog.md)) — no fixed output directory.
 - `updated_at` is refreshed on every save. `created_at` is stable after initial creation.
 
 ## What Export writes
@@ -90,7 +90,7 @@ project.bacmask/
 - CSV is disposable (can be regenerated from the bundle's polygons). The bundle is the source of truth.
 
 ## Versioning
-- Readers check `bacmask_version`. v1 and v2 are both accepted; unknown versions refused.
+- Readers check `biomask_version`. v1 and v2 are both accepted; unknown versions refused.
 - Future versions should add a `migrate_v{N}_to_v{N+1}` helper in `core/io_manager.py`.
 
 ## I/O surface (2026-05-04)

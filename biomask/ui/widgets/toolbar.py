@@ -4,7 +4,7 @@ Load, Save, and Export CSV are grouped under a single ``Data`` dropdown to
 keep the top row compact. Every action button's label still includes its
 keyboard shortcut — see
 [027 — Toolbar Hotkey Labels](../../../knowledge/027-toolbar-hotkey-labels.md).
-Labels are generated via :func:`bacmask.ui.input.desktop_adapter.button_label`
+Labels are generated via :func:`biomask.ui.input.desktop_adapter.button_label`
 so the source of truth is the keybinding registry.
 
 Calibration (mm/px + px/mm) sits at the right end of the toolbar so it's
@@ -24,9 +24,9 @@ from kivy.uix.button import Button
 from kivy.uix.dropdown import DropDown
 from kivy.uix.togglebutton import ToggleButton
 
-from bacmask.services.mask_service import MaskService
-from bacmask.ui.input.desktop_adapter import button_label
-from bacmask.ui.widgets.calibration_input import CalibrationInput
+from biomask.services.mask_service import MaskService
+from biomask.ui.input.desktop_adapter import button_label
+from biomask.ui.widgets.calibration_input import CalibrationInput
 
 TOOLBAR_HEIGHT = 40
 DATA_MENU_ITEM_HEIGHT = 40
@@ -80,7 +80,7 @@ class Toolbar(BoxLayout):
         # Tool toggles — exactly one is "down" at a time, mirroring active_tool.
         self._lasso_btn = ToggleButton(
             text=button_label("select_lasso", "Lasso"),
-            group="bacmask_tool",
+            group="biomask_tool",
             allow_no_selection=False,
             state="down" if service.state.active_tool == "lasso" else "normal",
         )
@@ -89,7 +89,7 @@ class Toolbar(BoxLayout):
 
         self._brush_btn = ToggleButton(
             text=button_label("select_brush", "Brush"),
-            group="bacmask_tool",
+            group="biomask_tool",
             allow_no_selection=False,
             state="down" if service.state.active_tool == "brush" else "normal",
         )
@@ -98,7 +98,7 @@ class Toolbar(BoxLayout):
 
         self._line_btn = ToggleButton(
             text=button_label("select_line", "Line"),
-            group="bacmask_tool",
+            group="biomask_tool",
             allow_no_selection=False,
             state="down" if service.state.active_tool == "line" else "normal",
         )

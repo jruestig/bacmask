@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import pytest
 
-from bacmask.core import io_manager as iom
+from biomask.core import io_manager as iom
 
 
 def _write_synthetic_image(tmp_path: Path, name: str = "img.png") -> Path:
@@ -90,7 +90,7 @@ def test_bundle_v2_round_trip(tmp_path):
         next_label_id=3,
         regions=regions,
     )
-    bundle_path = tmp_path / "x.bacmask"
+    bundle_path = tmp_path / "x.bmsk"
     iom.save_bundle(bundle_path, img_path, (20, 30), meta)
 
     loaded = iom.load_bundle(bundle_path)
@@ -124,7 +124,7 @@ def test_bundle_v2_round_trips_measurement_lines(tmp_path):
         lines=lines,
         next_line_id=3,
     )
-    bundle_path = tmp_path / "lines.bacmask"
+    bundle_path = tmp_path / "lines.bmsk"
     iom.save_bundle(bundle_path, img_path, (20, 30), meta)
 
     loaded = iom.load_bundle(bundle_path)
@@ -140,14 +140,14 @@ def test_bundle_v2_round_trips_measurement_lines(tmp_path):
 def test_bundle_without_lines_section_loads_as_empty(tmp_path):
     """Bundles written before the lines field existed must still load."""
     img_path = _write_synthetic_image(tmp_path)
-    p = tmp_path / "old.bacmask"
+    p = tmp_path / "old.bmsk"
     with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("image.png", img_path.read_bytes())
         zf.writestr(
             "meta.json",
             json.dumps(
                 {
-                    "bacmask_version": iom.BACMASK_VERSION,
+                    "biomask_version": iom.BIOMASK_VERSION,
                     "source_filename": img_path.name,
                     "image_shape": [20, 30],
                     "scale_mm_per_px": None,
@@ -164,7 +164,7 @@ def test_bundle_without_lines_section_loads_as_empty(tmp_path):
 def test_bundle_v2_does_not_write_mask_png(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
     meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
-    p = tmp_path / "x.bacmask"
+    p = tmp_path / "x.bmsk"
     iom.save_bundle(p, img_path, (20, 30), meta)
     with zipfile.ZipFile(p, "r") as zf:
         names = set(zf.namelist())
@@ -175,18 +175,18 @@ def test_bundle_v2_does_not_write_mask_png(tmp_path):
 def test_bundle_v2_meta_contains_version_and_image_shape(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
     meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
-    p = tmp_path / "x.bacmask"
+    p = tmp_path / "x.bmsk"
     iom.save_bundle(p, img_path, (20, 30), meta)
     with zipfile.ZipFile(p, "r") as zf:
         meta_json = json.loads(zf.read("meta.json"))
-    assert meta_json["bacmask_version"] == 2
+    assert meta_json["biomask_version"] == 2
     assert meta_json["image_shape"] == [20, 30]
 
 
 def test_bundle_uncalibrated_preserves_null_scale(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
     meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
-    p = tmp_path / "u.bacmask"
+    p = tmp_path / "u.bmsk"
     iom.save_bundle(p, img_path, (20, 30), meta)
     loaded = iom.load_bundle(p)
     assert loaded.meta.scale_mm_per_px is None
@@ -196,7 +196,7 @@ def test_bundle_preserves_source_bytes_exactly(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
     original_bytes = img_path.read_bytes()
     meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
-    p = tmp_path / "b.bacmask"
+    p = tmp_path / "b.bmsk"
     iom.save_bundle(p, img_path, (20, 30), meta)
     with zipfile.ZipFile(p, "r") as zf:
         assert zf.read("image.png") == original_bytes
@@ -214,7 +214,7 @@ def test_bundle_meta_json_is_deterministic(tmp_path):
         regions={},
         created_at="2026-04-18T00:00:00Z",
     )
-    p = tmp_path / "d.bacmask"
+    p = tmp_path / "d.bmsk"
     iom.save_bundle(p, img_path, (20, 30), meta)
     with zipfile.ZipFile(p, "r") as zf:
         text = zf.read("meta.json").decode()
@@ -224,14 +224,14 @@ def test_bundle_meta_json_is_deterministic(tmp_path):
 
 
 def test_bundle_unknown_version_raises(tmp_path):
-    p = tmp_path / "bad.bacmask"
+    p = tmp_path / "bad.bmsk"
     with zipfile.ZipFile(p, "w") as zf:
         zf.writestr("image.png", b"dummy")
         zf.writestr(
             "meta.json",
             json.dumps(
                 {
-                    "bacmask_version": 99,
+                    "biomask_version": 99,
                     "source_filename": "x",
                     "next_label_id": 1,
                     "regions": {},
@@ -245,13 +245,13 @@ def test_bundle_unknown_version_raises(tmp_path):
 
 
 def test_bundle_missing_member_raises(tmp_path):
-    p = tmp_path / "broken.bacmask"
+    p = tmp_path / "broken.bmsk"
     with zipfile.ZipFile(p, "w") as zf:
         zf.writestr(
             "meta.json",
             json.dumps(
                 {
-                    "bacmask_version": iom.BACMASK_VERSION,
+                    "biomask_version": iom.BIOMASK_VERSION,
                     "source_filename": "x",
                     "image_shape": [20, 30],
                     "next_label_id": 1,
@@ -277,9 +277,9 @@ def _build_v1_bundle(
     include_mask_png: bool = True,
 ) -> Path:
     """Hand-craft a v1 bundle directly via zipfile for back-compat tests."""
-    p = tmp_path / "v1.bacmask"
+    p = tmp_path / "v1.bmsk"
     v1_meta = {
-        "bacmask_version": 1,
+        "biomask_version": 1,
         "source_filename": "legacy.png",
         "created_at": "2025-01-01T00:00:00Z",
         "updated_at": "2025-01-01T00:00:00Z",
@@ -342,7 +342,7 @@ def test_resaving_v1_bundle_promotes_to_v2(tmp_path):
 
     loaded = iom.load_bundle(v1_path)
     # Write it back out using the normal v2 writer.
-    v2_path = tmp_path / "promoted.bacmask"
+    v2_path = tmp_path / "promoted.bmsk"
     iom.save_bundle_from_bytes(
         v2_path,
         image_bytes=img_path.read_bytes(),
@@ -356,8 +356,50 @@ def test_resaving_v1_bundle_promotes_to_v2(tmp_path):
         meta_json = json.loads(zf.read("meta.json"))
     assert "mask.png" not in names
     assert names == {"image.png", "meta.json"}
-    assert meta_json["bacmask_version"] == 2
+    assert meta_json["biomask_version"] == 2
     assert meta_json["image_shape"] == [20, 30]
+
+
+# --- legacy .bacmask back-compat ----------------------------------------------
+
+
+def test_load_legacy_bacmask_extension_and_version_key(tmp_path):
+    """A pre-rename bundle: ``.bacmask`` file with ``bacmask_version`` meta key."""
+    img_path = _write_synthetic_image(tmp_path)
+    img_bytes = img_path.read_bytes()
+    regions = _sample_regions()
+    legacy_path = tmp_path / "legacy.bacmask"
+    meta_json_doc = {
+        "bacmask_version": 2,
+        "source_filename": "legacy.png",
+        "image_shape": [20, 30],
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-01T00:00:00Z",
+        "scale_mm_per_px": 0.01,
+        "next_label_id": 3,
+        "regions": {
+            str(k): {"name": v["name"], "vertices": v["vertices"]} for k, v in regions.items()
+        },
+        "lines": {},
+        "next_line_id": 1,
+    }
+    with zipfile.ZipFile(legacy_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("image.png", img_bytes)
+        zf.writestr("meta.json", json.dumps(meta_json_doc, indent=2, sort_keys=True))
+
+    loaded = iom.load_bundle(legacy_path)
+    assert loaded.meta.source_filename == "legacy.png"
+    assert loaded.meta.next_label_id == 3
+    assert loaded.meta.regions[1]["vertices"] == regions[1]["vertices"]
+
+
+def test_is_bundle_suffix_accepts_new_and_legacy():
+    assert iom.is_bundle_suffix(".bmsk")
+    assert iom.is_bundle_suffix(".BMSK")
+    assert iom.is_bundle_suffix(".bacmask")
+    assert iom.is_bundle_suffix(".BacMask")
+    assert not iom.is_bundle_suffix(".png")
+    assert not iom.is_bundle_suffix("")
 
 
 # --- source carriers (filesystem-free I/O) ------------------------------------
@@ -431,7 +473,7 @@ def test_bundle_source_round_trip_via_bytesio():
         meta=meta,
     )
 
-    src = iom.BundleSource.from_bytes(sink.getvalue(), name="mem.bacmask")
+    src = iom.BundleSource.from_bytes(sink.getvalue(), name="mem.bmsk")
     contents = iom.open_bundle(src)
     assert contents.image.shape == (20, 30)
     assert contents.image_ext == ".png"
@@ -444,7 +486,7 @@ def test_bundle_source_round_trip_via_bytesio():
 def test_bundle_source_from_stream_matches_from_path(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
     meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
-    bundle_path = tmp_path / "x.bacmask"
+    bundle_path = tmp_path / "x.bmsk"
     iom.save_bundle(bundle_path, img_path, (20, 30), meta)
 
     via_path = iom.open_bundle(iom.BundleSource.from_path(bundle_path))
@@ -461,7 +503,7 @@ def test_open_bundle_carries_image_bytes(tmp_path):
     img_path = _write_synthetic_image(tmp_path)
     original = img_path.read_bytes()
     meta = iom.BundleMeta(img_path.name, (20, 30), None, 1, {})
-    bundle_path = tmp_path / "x.bacmask"
+    bundle_path = tmp_path / "x.bmsk"
     iom.save_bundle(bundle_path, img_path, (20, 30), meta)
 
     contents = iom.open_bundle(iom.BundleSource.from_path(bundle_path))

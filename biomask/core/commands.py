@@ -15,7 +15,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from bacmask.core import masking
+from biomask.core import masking
 
 
 def _union_bbox(

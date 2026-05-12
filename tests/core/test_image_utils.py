@@ -1,6 +1,6 @@
 import pytest
 
-from bacmask.utils import image_utils as iu
+from biomask.utils import image_utils as iu
 
 # ---- fit_to_widget ----------------------------------------------------------
 

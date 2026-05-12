@@ -6,16 +6,16 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME: str = "BacMask"
+APP_NAME: str = "BioMask"
 
 
 def _default_output_root() -> Path:
     """Resolve the writable output root.
 
-    Precedence: ``BACMASK_OUTPUT_ROOT`` env var > installed build
+    Precedence: ``BIOMASK_OUTPUT_ROOT`` env var > installed build
     user-data dir > repo-local ``output/`` for dev runs.
     """
-    override = os.environ.get("BACMASK_OUTPUT_ROOT")
+    override = os.environ.get("BIOMASK_OUTPUT_ROOT")
     if override:
         return Path(override)
     if getattr(sys, "frozen", False):

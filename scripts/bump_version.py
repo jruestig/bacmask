@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bump BacMask version across pyproject.toml, version_info.txt, installer.iss.
+"""Bump BioMask version across pyproject.toml, version_info.txt, installer.iss.
 
 Usage:
     uv run scripts/bump_version.py 0.0.5
@@ -91,7 +91,7 @@ def commit_and_tag(version: str) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="bump BacMask version in lockstep")
+    ap = argparse.ArgumentParser(description="bump BioMask version in lockstep")
     ap.add_argument("version", help="new version, e.g. 0.0.5")
     ap.add_argument(
         "--tag",

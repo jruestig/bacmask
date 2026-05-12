@@ -13,10 +13,10 @@ os.environ.setdefault("KIVY_GL_BACKEND", "mock")
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from bacmask.services.mask_service import MaskService  # noqa: E402
-from bacmask.ui.input.events import Pan, Zoom  # noqa: E402
-from bacmask.ui.widgets.image_canvas import ImageCanvas  # noqa: E402
-from bacmask.utils import image_utils  # noqa: E402
+from biomask.services.mask_service import MaskService  # noqa: E402
+from biomask.ui.input.events import Pan, Zoom  # noqa: E402
+from biomask.ui.widgets.image_canvas import ImageCanvas  # noqa: E402
+from biomask.utils import image_utils  # noqa: E402
 
 
 def _mock_service_with_image(img_w: int, img_h: int) -> MaskService:

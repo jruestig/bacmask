@@ -9,7 +9,7 @@ related: [008]
 
 # Project Overview
 
-BacMask is a cross-platform, single-purpose tool: mask bacteria colonies in microscope/camera images and compute per-colony area in mm².
+BioMask is a cross-platform, single-purpose tool: mask bacteria colonies in microscope/camera images and compute per-colony area in mm².
 
 ## Scope anchor
 - **In scope:** load image → calibrate (mm/px) → paint/erase/flood-fill masks → view areas → save masks (16-bit PNG) + areas (CSV).

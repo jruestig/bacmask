@@ -1,4 +1,4 @@
-"""I/O for images, .bacmask bundles, and sibling CSV.
+"""I/O for images, .bmsk bundles, and sibling CSV.
 
 The public surface has two layers:
 
@@ -37,8 +37,21 @@ from typing import Any, BinaryIO
 import cv2
 import numpy as np
 
-BACMASK_VERSION = 2
-BACMASK_VERSION_V1 = 1
+BIOMASK_VERSION = 2
+BIOMASK_VERSION_V1 = 1
+
+# Bundle file extensions. ``.bmsk`` is the current write extension; ``.bacmask``
+# is the legacy name and remains accepted on load (read-only). New saves always
+# use ``.bmsk``.
+BUNDLE_EXT = ".bmsk"
+LEGACY_BUNDLE_EXTS: tuple[str, ...] = (".bacmask",)
+
+
+def is_bundle_suffix(suffix: str) -> bool:
+    """True for any suffix recognized as a bundle (current or legacy)."""
+    s = suffix.lower()
+    return s == BUNDLE_EXT or s in LEGACY_BUNDLE_EXTS
+
 
 CSV_HEADER = [
     "filename",
@@ -61,7 +74,7 @@ LINES_CSV_HEADER = [
 
 class UnsupportedBundleVersion(Exception):
     def __init__(self, version: Any) -> None:
-        super().__init__(f"unsupported bacmask_version: {version!r}")
+        super().__init__(f"unsupported biomask_version: {version!r}")
         self.version = version
 
 
@@ -121,7 +134,11 @@ class ImageSource:
 
 @dataclass(frozen=True)
 class BundleSource:
-    """Encoded ``.bacmask`` ZIP bytes ready for parsing.
+    """Encoded ``.bmsk`` ZIP bytes ready for parsing.
+
+    Also covers legacy ``.bacmask`` archives — wire format is identical, only
+    the file extension and the historical ``bacmask_version`` meta key differ
+    (both handled in :func:`open_bundle`).
 
     The full archive is materialized into memory because :class:`zipfile.ZipFile`
     needs a seekable input and SAF file descriptors aren't always cheaply
@@ -268,7 +285,7 @@ def _write_lines_csv_rows(f: Any, rows: list[LineRow]) -> None:
         )
 
 
-# ---- .bacmask bundle ---------------------------------------------------------
+# ---- .bmsk bundle ------------------------------------------------------------
 
 
 @dataclass
@@ -304,7 +321,7 @@ def save_bundle_from_bytes(
     image_shape: tuple[int, int],
     meta: BundleMeta,
 ) -> None:
-    """Write a v2 ``.bacmask`` ZIP given raw source-image bytes and extension.
+    """Write a v2 ``.bmsk`` ZIP given raw source-image bytes and extension.
 
     ``target`` is either a filesystem path or a writable binary stream.
     ``zipfile.ZipFile`` accepts both natively, so the same writer covers
@@ -320,7 +337,7 @@ def save_bundle_from_bytes(
     h, w = image_shape
     now_iso = _utcnow_iso()
     meta_json = {
-        "bacmask_version": BACMASK_VERSION,
+        "biomask_version": BIOMASK_VERSION,
         "source_filename": meta.source_filename,
         "image_shape": [int(h), int(w)],
         "created_at": meta.created_at or now_iso,
@@ -384,8 +401,10 @@ def open_bundle(source: BundleSource) -> BundleContents:
         meta_bytes = zf.read("meta.json")
 
     meta_json = json.loads(meta_bytes)
-    version = meta_json.get("bacmask_version")
-    if version not in (BACMASK_VERSION_V1, BACMASK_VERSION):
+    # Legacy bundles (the .bacmask era) stored the version under
+    # ``bacmask_version``. Accept it on read so older saves remain loadable.
+    version = meta_json.get("biomask_version", meta_json.get("bacmask_version"))
+    if version not in (BIOMASK_VERSION_V1, BIOMASK_VERSION):
         raise UnsupportedBundleVersion(version)
 
     image_arr = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
@@ -431,7 +450,7 @@ def open_bundle(source: BundleSource) -> BundleContents:
 
 
 def load_bundle(bundle_path: Path | str) -> BundleContents:
-    """Convenience: read + parse a ``.bacmask`` bundle from a filesystem path.
+    """Convenience: read + parse a bundle (``.bmsk`` or legacy ``.bacmask``) from a filesystem path.
 
     Equivalent to ``open_bundle(BundleSource.from_path(path))``.
     """

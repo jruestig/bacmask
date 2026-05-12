@@ -20,7 +20,7 @@ Examples (MVP):
 | Button label           | Action                 | Keybinding ([016](016-input-abstraction.md)) |
 |------------------------|------------------------|--------------------------------|
 | `Load (Ctrl+O)`        | Open image             | `Ctrl+O`                       |
-| `Save (Ctrl+S)`        | Write `.bacmask` bundle| `Ctrl+S`                       |
+| `Save (Ctrl+S)`        | Write `.bmsk` bundle| `Ctrl+S`                       |
 | `Export CSV (Ctrl+E)`  | Write areas CSV        | `Ctrl+E`                       |
 | `Lasso (L)`            | Activate lasso tool    | `L`                            |
 | `Brush (B)`            | Activate brush tool    | `B`                            |

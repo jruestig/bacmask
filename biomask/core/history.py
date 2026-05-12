@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Any, Protocol
 
-from bacmask.config import defaults
+from biomask.config import defaults
 
 
 class Command(Protocol):

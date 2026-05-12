@@ -12,7 +12,7 @@ related: [002, 005, 008, 036]
 Strict three-layer split. The most critical architectural decision in the project.
 
 ## Rule
-`bacmask/core/` contains **zero Kivy imports**. Ever.
+`biomask/core/` contains **zero Kivy imports**. Ever.
 
 ## Layers
 - **`core/`** — pure Python: state, masking, area, I/O, calibration, commands, history, validators. Headless-runnable. Fully unit-testable without any UI harness.

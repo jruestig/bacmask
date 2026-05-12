@@ -2,7 +2,7 @@ Handoff: Collapse the dual keyboard / action-dispatch path
                                                                                                           
   Goal                                                                           
                                                                                                           
-  There is currently one action vocabulary (Action(name=…) from bacmask/ui/input/events.py) but two       
+  There is currently one action vocabulary (Action(name=…) from biomask/ui/input/events.py) but two       
   separate dispatchers that translate it into service calls. They have overlapping but non-identical
   behavior. Consolidate into one dispatcher.                                                              
                                                                                  
@@ -11,17 +11,17 @@ Handoff: Collapse the dual keyboard / action-dispatch path
                                                                                                           
   Current state — verified                                                       
                                                       
-  Path A: window-level keyboard (bacmask/ui/app.py)                                                       
+  Path A: window-level keyboard (biomask/ui/app.py)                                                       
   - Window.bind(on_key_down=self._on_key_down) at app.py:41
   - _on_key_down (app.py:57-78) translates Kivy key codes via local _kivy_key_name map (app.py:378-397),  
-  calls keybinding_for(key, modifiers) from bacmask.ui.input.desktop_adapter to get an action name, then
+  calls keybinding_for(key, modifiers) from biomask.ui.input.desktop_adapter to get an action name, then
   calls _run_action.                                                                                      
   - _run_action (app.py:80-131) is the dispatcher: close_lasso, cancel_stroke, undo, redo, delete_region,
   save_bundle, export_csv, select_lasso/brush/line, toggle_brush_mode, load_image, pan_left/right/up/down.
   - Has guards: _open_modal_count (skip when popup is open), _text_input_focused (skip when a TextInput   
   owns focus).                                                                                         
                                                                                                           
-  Path B: canvas-emitted Actions (bacmask/ui/widgets/image_canvas.py)            
+  Path B: canvas-emitted Actions (biomask/ui/widgets/image_canvas.py)            
   - DesktopInputAdapter(emit=self._on_input) at image_canvas.py:128.                                      
   - _on_input (image_canvas.py:697-740) handles pointer/zoom/pan events, and dispatches Action events to  
   _handle_action.                                                                                         
@@ -30,7 +30,7 @@ Handoff: Collapse the dual keyboard / action-dispatch path
   _brush_preview_pts on cancel_stroke — a canvas-internal that the app-side dispatcher does not know      
   about.                                                                                            
                                                                                                           
-  The dead bit: DesktopInputAdapter.on_key_down (bacmask/ui/input/desktop_adapter.py:167-173) exists but
+  The dead bit: DesktopInputAdapter.on_key_down (biomask/ui/input/desktop_adapter.py:167-173) exists but
   is never called. Kivy delivers key events to Window, not to widgets. The adapter's keyboard translation 
   method is unreachable code.
                                                                                                           
@@ -53,14 +53,14 @@ Handoff: Collapse the dual keyboard / action-dispatch path
                                                                                                           
   Concrete shape:                                                                
                                                       
-  1. BacMaskApp exposes one public dispatch_action(name: str) -> bool — what _run_action does today, but  
+  1. BioMaskApp exposes one public dispatch_action(name: str) -> bool — what _run_action does today, but  
   renamed and addressable from the canvas. Returns True if the action was handled. Move _run_action's body
    verbatim; this is a rename, not a logic change.                                                        
   2. ImageCanvas accepts an on_action: Callable[[str], bool] callback in its constructor. Replace
   _handle_action body with self._on_action(event.name). Drop the per-action branching in the canvas — the 
   app-side dispatcher handles all of them.
-  3. MainScreen plumbs the callback from BacMaskApp.dispatch_action to ImageCanvas. Update                
-  MainScreen.__init__ signature in bacmask/ui/screens/main_screen.py.                                     
+  3. MainScreen plumbs the callback from BioMaskApp.dispatch_action to ImageCanvas. Update                
+  MainScreen.__init__ signature in biomask/ui/screens/main_screen.py.                                     
   4. Move canvas-internal cleanup out of the dispatcher. The _brush_preview_pts = [] in current
   _handle_action at cancel_stroke is the only canvas-specific side-effect. Make the canvas subscribe to   
   MaskService state changes (it already does, see image_canvas.py — it has a _last_regions_version cache)
@@ -93,30 +93,30 @@ Handoff: Collapse the dual keyboard / action-dispatch path
 
   Files that change
 
-  - bacmask/ui/app.py — rename _run_action → dispatch_action, expose as instance method; pass to MainScreen.
-  - bacmask/ui/screens/main_screen.py — new on_action parameter, forwarded to ImageCanvas.
-  - bacmask/ui/widgets/image_canvas.py — new constructor param on_action; replace _handle_action with single forward call; move _brush_preview_pts reset into a state-subscription side effect.
-  - bacmask/ui/input/desktop_adapter.py — delete DesktopInputAdapter.on_key_down if going with resolution (a). Keep keybinding_for and the rest.
+  - biomask/ui/app.py — rename _run_action → dispatch_action, expose as instance method; pass to MainScreen.
+  - biomask/ui/screens/main_screen.py — new on_action parameter, forwarded to ImageCanvas.
+  - biomask/ui/widgets/image_canvas.py — new constructor param on_action; replace _handle_action with single forward call; move _brush_preview_pts reset into a state-subscription side effect.
+  - biomask/ui/input/desktop_adapter.py — delete DesktopInputAdapter.on_key_down if going with resolution (a). Keep keybinding_for and the rest.
 
   Files that should NOT change
 
-  - bacmask/core/* — no UI imports, not touched.
-  - bacmask/services/mask_service.py — already the action target, no change.
-  - bacmask/ui/input/events.py — vocabulary stays.
+  - biomask/core/* — no UI imports, not touched.
+  - biomask/services/mask_service.py — already the action target, no change.
+  - biomask/ui/input/events.py — vocabulary stays.
   - The keybinding registry in desktop_adapter.py — leave alone.
 
   Tests
 
   - Existing keyboard tests in tests/ui/test_input_events.py are pure registry tests on keybinding_for / label_for_action / button_label. They should keep passing without modification.
   - Canvas tests in tests/ui/test_image_canvas_*.py may need light updates — check whether any test triggers _handle_action directly. If yes, replace with calls through the new on_action callback or directly
-  through BacMaskApp.dispatch_action.
+  through BioMaskApp.dispatch_action.
   - Add one new test: cancel_stroke from window keyboard while a brush stroke is in flight clears the canvas preview points. This is the bug the dual dispatch was hiding.
 
   Acceptance
 
   - uv run --extra dev pytest — all green (currently 225 tests after item 1).
-  - uv run --extra dev ruff check bacmask tests — clean.
-  - uv run --extra dev ruff format --check bacmask tests — clean.
+  - uv run --extra dev ruff check biomask tests — clean.
+  - uv run --extra dev ruff format --check biomask tests — clean.
   - Manual smoke: launch with uv run python main.py images/<some>.tif, draw a lasso, press Esc mid-stroke (preview disappears), press B then start a brush stroke, press Esc mid-stroke (preview disappears, no
   leftover dots), Ctrl+Z undoes, Ctrl+S opens Save As.
 

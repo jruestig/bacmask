@@ -1,11 +1,11 @@
-# CLAUDE.md — BacMask: Bacteria Colony Masking & Area Measurement Tool
+# CLAUDE.md — BioMask: Bacteria Colony Masking & Area Measurement Tool
 
 > **Deeper rationale and design notes live in [`knowledge/`](knowledge/README.md)** (Zettelkasten).
 > CLAUDE.md holds scope, rules, and contracts. The knowledge base holds the **why**.
 > When in doubt about a decision's motivation, read the linked note before diverging.
 
 ## Project Overview
-BacMask is a cross-platform image analysis tool inspired by ImageJ, **focused exclusively**
+BioMask is a cross-platform image analysis tool inspired by ImageJ, **focused exclusively**
 on masking bacteria colonies in microscope/camera images and computing their areas in mm².
 This is NOT a general-purpose image editor. There are no filters, color adjustments, or
 unrelated tools.
@@ -15,7 +15,7 @@ The primary workflow is:
 2. Provide a scale factor (mm per pixel) for calibration.
 3. Trace region boundaries around colonies with the lasso tool.
 4. View computed areas (px and mm²) for all labeled regions.
-5. Save a `.bacmask` bundle (image + mask + metadata) plus a sibling CSV of areas.
+5. Save a `.bmsk` bundle (image + mask + metadata) plus a sibling CSV of areas.
 
 See [knowledge/000 — Project Overview](knowledge/000-project-overview.md) for the scope anchor.
 
@@ -25,9 +25,9 @@ See [knowledge/000 — Project Overview](knowledge/000-project-overview.md) for 
   See [knowledge/010 — Kivy over BeeWare](knowledge/010-kivy-over-beeware.md) and
   [knowledge/020 — Platform Scope](knowledge/020-platform-scope.md).
 - **Image Processing:** OpenCV (`opencv-python-headless`) + NumPy.
-- **Save Format:** `.bacmask` ZIP bundle — see [knowledge/015](knowledge/015-bacmask-bundle.md).
+- **Save Format:** `.bmsk` ZIP bundle — see [knowledge/015](knowledge/015-biomask-bundle.md).
 - **Sibling CSV** for areas — see [knowledge/011](knowledge/011-csv-for-area-output.md).
-- **Mask Storage:** masks are no longer persisted — polygons are canonical ([knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/025](knowledge/025-overlapping-regions.md)). Historical PNG label-map rationale: [knowledge/superseded/012](knowledge/superseded/012-png-label-maps.md).
+- **Mask Storage:** masks are no longer persisted — polygons are canonical ([knowledge/015](knowledge/015-biomask-bundle.md), [knowledge/025](knowledge/025-overlapping-regions.md)). Historical PNG label-map rationale: [knowledge/superseded/012](knowledge/superseded/012-png-label-maps.md).
 - **Formatter/Linter:** `ruff`. See [knowledge/019 — Dev Tooling](knowledge/019-dev-tooling.md).
 
 ## Architecture
@@ -60,7 +60,7 @@ knowledge base. Start here:
 - **Polygons are canonical.** Each region is fully specified by `label_id`, `name`, and an ordered `vertices` list. Everything mask-related is derived from the polygon set.
 - **Regions may overlap.** A pixel can belong to any number of regions ([knowledge/025](knowledge/025-overlapping-regions.md)). There is no single owner; there is no stored label map. Display rendering and click-select resolve overlap by highest `label_id` (newest on top).
 - IDs are **monotonic and never re-used** after deletion ([knowledge/014](knowledge/014-lasso-tool.md)).
-- The `.bacmask` bundle stores only `image.<ext>` + `meta.json` ([knowledge/015](knowledge/015-bacmask-bundle.md)). No raster mask on disk.
+- The `.bmsk` bundle stores only `image.<ext>` + `meta.json` ([knowledge/015](knowledge/015-biomask-bundle.md)). No raster mask on disk.
 - Raster masks for segmentation training are produced by a **deferred, headless export** — a Python function that greedy-packs polygons into layered `uint16` `.npy` files. Not wired to the UI; not MVP ([knowledge/024](knowledge/024-mask-export-deferred.md)).
 
 ### Calibration
@@ -80,7 +80,7 @@ area_mm2 = pixel_count * (scale_factor_mm_per_px ** 2)
 
 **Save** (`Ctrl+S` / toolbar button) writes the bundle only:
 
-- **`<image_stem>.bacmask`** — ZIP with:
+- **`<image_stem>.bmsk`** — ZIP with:
   - `image.<ext>` (original bytes)
   - `meta.json` (v2 schema: scale, region vertices + names, next_label_id, image_shape)
   - No raster mask.
@@ -102,7 +102,7 @@ area_mm2 = pixel_count * (scale_factor_mm_per_px ** 2)
 
 **Mask export** for training is a separate, non-UI Python operation ([knowledge/024](knowledge/024-mask-export-deferred.md)) — deferred; not MVP.
 
-Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowledge/011-csv-for-area-output.md), [knowledge/025](knowledge/025-overlapping-regions.md).
+Details: [knowledge/015](knowledge/015-biomask-bundle.md), [knowledge/011](knowledge/011-csv-for-area-output.md), [knowledge/025](knowledge/025-overlapping-regions.md).
 
 ## UI/UX Requirements
 
@@ -138,8 +138,8 @@ Details: [knowledge/015](knowledge/015-bacmask-bundle.md), [knowledge/011](knowl
 
 4. **File Operations:**
    - **Load Image (`Ctrl+O`):** file picker, accepts common formats (PNG, JPG, TIFF, BMP). File upload only — no camera, no URL. Double-click on a file in the picker opens it ([knowledge/028](knowledge/028-file-picker-double-click.md)). A clickable **breadcrumb path bar** sits above the file list — every segment is a button that jumps the chooser to that directory ([knowledge/033](knowledge/033-file-picker-breadcrumb-bar.md)). Same bar on Save and Export pickers.
-   - **Load Bundle:** `.bacmask` → restore image + polygons + scale. Rasterization happens in memory from polygons; no in-bundle mask to reconcile. Double-click opens, same as Load Image.
-   - **Save (`Ctrl+S`):** writes only the `.bacmask` bundle.
+   - **Load Bundle:** `.bmsk` → restore image + polygons + scale. Rasterization happens in memory from polygons; no in-bundle mask to reconcile. Double-click opens, same as Load Image.
+   - **Save (`Ctrl+S`):** writes only the `.bmsk` bundle.
    - **Export CSV (`Ctrl+E`):** writes only the areas CSV. Separate button from Save.
 
 5. **Input abstraction:**
@@ -205,12 +205,12 @@ No other dependencies. Keep it lean.
 - [x] User can delete a region; its label ID is not re-used. A subtract-mode brush stroke that empties a region resolves as a Delete.
 - [x] All region areas (px and mm²) are displayed in a results panel, updating live.
 - [x] Masks persist on the canvas — they never auto-disappear.
-- [x] **Save** writes `<image_stem>.bacmask` (bundle only, no mask, no CSV).
+- [x] **Save** writes `<image_stem>.bmsk` (bundle only, no mask, no CSV).
 - [x] **Export** writes `<image_stem>_areas.csv` (CSV only).
 - [x] Bundle can be reloaded for a given image and restores regions + scale + IDs exactly (polygons canonical). Double-click on a file in the picker opens it.
 - [x] CSV is directly human-readable with the locked column schema.
 - [x] Undo / redo works for lasso close, brush stroke, and delete, with a bounded history.
 - [x] Every toolbar button label includes its keyboard shortcut.
-- [ ] App runs on Linux and Windows. *(Linux verified; Windows validation deferred — `packaging/bacmask.spec` exists but no built/tested `.exe` yet.)*
+- [ ] App runs on Linux and Windows. *(Linux verified; Windows validation deferred — `packaging/biomask.spec` exists but no built/tested `.exe` yet.)*
 - [x] Unit tests pass for core logic (rasterization, area, bundle I/O, CSV, undo/redo, calibration).
 - [x] `ruff check` and `ruff format --check` pass.

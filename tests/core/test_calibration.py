@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from bacmask.core import calibration
+from biomask.core import calibration
 
 
 def test_accepts_positive_float():

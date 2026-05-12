@@ -4,8 +4,8 @@ import cv2
 import numpy as np
 import pytest
 
-from bacmask.core import io_manager
-from bacmask.services.mask_service import MaskService
+from biomask.core import io_manager
+from biomask.services.mask_service import MaskService
 
 
 def _write_image(tmp_path: Path, name: str = "img.png") -> Path:
@@ -100,7 +100,7 @@ def test_close_lasso_stores_raster_derived_contour(tmp_path):
     # that could sit inside the drawn shape.
     raw_verts = [(10, 10), (30, 10), (30, 30), (12, 30), (12, 15)]
     _draw_lasso(svc, raw_verts)
-    from bacmask.core import masking
+    from biomask.core import masking
 
     stored = np.asarray(svc.state.regions[1]["vertices"], dtype=np.int32)
     mask = masking.rasterize_polygon_mask(stored, svc.state.label_map.shape)
@@ -211,7 +211,7 @@ def test_compute_area_rows_uses_polygon_shoelace(tmp_path):
     shoelace of the region's stored polygon. This is the anchor against
     regression to the old cached-``region_areas`` code path.
     """
-    from bacmask.core import masking
+    from biomask.core import masking
 
     svc = MaskService()
     svc.load_image(_write_image(tmp_path))
@@ -237,7 +237,7 @@ def test_save_bundle_and_export_csv(tmp_path):
     _draw_lasso(svc, _square())
     svc.set_calibration(0.01)
 
-    bundle_p = tmp_path / "out.bacmask"
+    bundle_p = tmp_path / "out.bmsk"
     csv_p = tmp_path / "out.csv"
     svc.save_bundle(bundle_p)
     svc.export_csv(csv_p)
@@ -257,7 +257,7 @@ def test_save_bundle_does_not_write_csv(tmp_path):
     svc.load_image(_write_image(tmp_path))
     _draw_lasso(svc, _square())
 
-    bundle_p = tmp_path / "s.bacmask"
+    bundle_p = tmp_path / "s.bmsk"
     svc.save_bundle(bundle_p)
 
     assert bundle_p.exists()
@@ -330,7 +330,7 @@ def test_load_bundle_restores_state(tmp_path):
     _draw_lasso(svc, _square())
     svc.set_calibration(0.02)
 
-    bundle_p = tmp_path / "round.bacmask"
+    bundle_p = tmp_path / "round.bmsk"
     svc.save_bundle(bundle_p)
 
     svc2 = MaskService()
@@ -353,7 +353,7 @@ def test_save_load_round_trips_measurement_lines(tmp_path):
     second = svc.commit_line((10, 30))
     assert first == 1 and second == 2
 
-    bundle_p = tmp_path / "lines.bacmask"
+    bundle_p = tmp_path / "lines.bmsk"
     svc.save_bundle(bundle_p)
 
     svc2 = MaskService()
@@ -377,7 +377,7 @@ def test_id_stability_survives_save_load(tmp_path):
     svc.delete_region(1)
     assert svc.state.next_label_id == 3  # not decremented
 
-    bundle_p = tmp_path / "s.bacmask"
+    bundle_p = tmp_path / "s.bmsk"
     svc.save_bundle(bundle_p)
 
     svc2 = MaskService()
@@ -393,7 +393,7 @@ def test_id_stability_survives_save_load(tmp_path):
 def test_save_bundle_without_image_raises(tmp_path):
     svc = MaskService()
     with pytest.raises(ValueError):
-        svc.save_bundle(tmp_path / "x.bacmask")
+        svc.save_bundle(tmp_path / "x.bmsk")
 
 
 def test_export_csv_without_image_raises(tmp_path):
@@ -691,7 +691,7 @@ def test_load_bundle_rebuilds_label_map(tmp_path):
     _draw_lasso(svc, _square())
     svc.set_calibration(0.01)
 
-    bundle_p = tmp_path / "x.bacmask"
+    bundle_p = tmp_path / "x.bmsk"
     svc.save_bundle(bundle_p)
 
     svc2 = MaskService()
@@ -705,7 +705,7 @@ def test_close_lasso_discards_zero_area_polygon(tmp_path, caplog):
     svc.load_image(_write_image(tmp_path))
     # Three collinear points — polygon encloses no area.
     collinear = [(5, 5), (10, 5), (15, 5)]
-    with caplog.at_level("WARNING", logger="bacmask.services.mask_service"):
+    with caplog.at_level("WARNING", logger="biomask.services.mask_service"):
         assert _draw_lasso(svc, collinear) is None
     assert svc.state.regions == {}
     assert svc.state.next_label_id == 1
@@ -717,14 +717,14 @@ def test_close_lasso_discards_zero_area_polygon(tmp_path, caplog):
 
 def _region_pixels(svc: MaskService, label_id: int) -> int:
     """Rasterize the canonical polygon for ``label_id`` and return its pixel count."""
-    from bacmask.core import masking
+    from biomask.core import masking
 
     verts = np.asarray(svc.state.regions[label_id]["vertices"], dtype=np.int32)
     return int(masking.rasterize_polygon_mask(verts, svc.state.label_map.shape).sum())
 
 
 def _region_mask(svc: MaskService, label_id: int) -> np.ndarray:
-    from bacmask.core import masking
+    from biomask.core import masking
 
     verts = np.asarray(svc.state.regions[label_id]["vertices"], dtype=np.int32)
     return masking.rasterize_polygon_mask(verts, svc.state.label_map.shape)
@@ -1078,7 +1078,7 @@ def test_brush_add_reads_polygon_not_mask(tmp_path):
 
     # Rasterize the committed polygon and verify it covers the original
     # target's interior *and* the stroke extension.
-    from bacmask.core import masking
+    from biomask.core import masking
 
     committed_mask = masking.rasterize_polygon_mask(
         np.asarray(svc.state.regions[1]["vertices"], dtype=np.int32),
@@ -1126,7 +1126,7 @@ def test_brush_edited_regions_survive_bundle_round_trip(tmp_path):
     pre_next_id = svc.state.next_label_id
     pre_label_map = svc.state.label_map.copy()
 
-    bundle_p = tmp_path / "rt.bacmask"
+    bundle_p = tmp_path / "rt.bmsk"
     svc.save_bundle(bundle_p)
 
     svc2 = MaskService()
@@ -1159,8 +1159,8 @@ def test_save_load_save_meta_is_stable_modulo_updated_at(tmp_path):
     assert _run_brush(svc, [(13, 18), (15, 18)], mode="subtract") == "subtracted"
     svc.set_calibration(0.005)
 
-    a = tmp_path / "a.bacmask"
-    b = tmp_path / "b.bacmask"
+    a = tmp_path / "a.bmsk"
+    b = tmp_path / "b.bmsk"
     svc.save_bundle(a)
 
     svc2 = MaskService()
@@ -1195,7 +1195,7 @@ def test_brush_edit_round_trip_survives_undo_redo(tmp_path):
     assert svc.redo() is True
     assert [list(p) for p in svc.state.regions[1]["vertices"]] == after_add
 
-    bundle_p = tmp_path / "u.bacmask"
+    bundle_p = tmp_path / "u.bmsk"
     svc.save_bundle(bundle_p)
     svc2 = MaskService()
     svc2.load_bundle(bundle_p)

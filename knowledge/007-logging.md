@@ -12,7 +12,7 @@ related: [006]
 Python `logging` module. Never `print()`.
 
 ## Setup
-- `bacmask/utils/logger.py` — configures root logger on app startup.
+- `biomask/utils/logger.py` — configures root logger on app startup.
 - Named loggers per module: `logger = logging.getLogger(__name__)`.
 - Level read from `config.yaml` (see [006](006-configuration-management.md)). Default: `INFO`.
 

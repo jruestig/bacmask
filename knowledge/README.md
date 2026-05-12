@@ -1,4 +1,4 @@
-# BacMask Knowledge Base
+# BioMask Knowledge Base
 
 Zettelkasten-style notes for ideas, decisions, and design rationale. Preserves conversation context between sessions.
 
@@ -47,7 +47,7 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Preserves c
 
 ### Product behavior & scope (2026-04-17)
 - [014 — Lasso Tool (region creation)](014-lasso-tool.md)
-- [015 — .bacmask Bundle Format](015-bacmask-bundle.md)
+- [015 — .bmsk Bundle Format](015-biomask-bundle.md)
 - [016 — Input Abstraction Layer](016-input-abstraction.md)
 - [017 — Calibration Input Model](017-calibration-input.md)
 - [019 — Development Tooling](019-dev-tooling.md)
@@ -70,13 +70,13 @@ Zettelkasten-style notes for ideas, decisions, and design rationale. Preserves c
 ### File I/O UX (2026-04-30)
 - [032 — Save As / Export As Dialog (User-Chosen Path)](032-save-as-dialog.md) — Save/Export prompt for path; New Folder button; modal popups suppress global shortcuts; output dirs no longer auto-created.
 - [033 — File Picker Breadcrumb Path Bar](033-file-picker-breadcrumb-bar.md) — clickable path segments above every chooser; one-click jump to any ancestor.
-- [034 — Windows "Open with BacMask" for Image Files](034-windows-image-open-with.md) — opt-in installer task; OpenWithProgids only; never becomes default.
+- [034 — Windows "Open with BioMask" for Image Files](034-windows-image-open-with.md) — opt-in installer task; OpenWithProgids only; never becomes default.
 
 ### Core I/O abstraction (2026-05-04)
 - [035 — I/O Source Carriers (Path-Free Decode)](035-io-source-carriers.md) — `ImageSource` / `BundleSource` carriers + pure decoders; load/save accept streams; Android SAF wires in without core changes.
 
 ### UI dispatch consolidation (2026-05-04)
-- [036 — Single Action Dispatcher (App-Level)](036-single-action-dispatcher.md) — collapsed window-keyboard + canvas dispatchers into `BacMaskApp.dispatch_action`; canvas brush-preview cleanup moved to a state subscription.
+- [036 — Single Action Dispatcher (App-Level)](036-single-action-dispatcher.md) — collapsed window-keyboard + canvas dispatchers into `BioMaskApp.dispatch_action`; canvas brush-preview cleanup moved to a state subscription.
 
 ### Superseded (archived in [`superseded/`](superseded/))
 Retired decisions kept for reasoning trails and decision-record context. Do **not** implement against these — each carries a banner pointing to its replacement.
@@ -89,9 +89,9 @@ Retired decisions kept for reasoning trails and decision-record context. Do **no
 
 ## Tags
 - `architecture` — structural decisions
-- `core` — applies to `bacmask/core/` package
-- `services` — applies to `bacmask/services/` package
-- `ui` — applies to `bacmask/ui/` package
+- `core` — applies to `biomask/core/` package
+- `services` — applies to `biomask/services/` package
+- `ui` — applies to `biomask/ui/` package
 - `testing` — test strategy & fixtures
 - `perf` — performance / scalability
 - `config` — configuration & defaults

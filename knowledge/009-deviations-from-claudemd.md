@@ -53,9 +53,9 @@ If someone reads `CLAUDE.md` first and wonders why the real tree has extra packa
 ## Round 5 updates (resolved 2026-04-19, overlap + bundle simplification)
 - **Overlaps allowed.** Regions may share pixels. New note: [025](025-overlapping-regions.md). Supersedes the disjoint-regions invariant and the clip rule in [021](superseded/021-vertex-edit-collision.md).
 - **Polygons are canonical.** `regions` dict (vertex lists) is the source of truth. In-memory per-region binary masks + a label-map display cache are derived; neither is persisted. [002](002-state-management.md) revised.
-- **Bundle v2 drops the mask.** `.bacmask` = `image.<ext>` + `meta.json` only. `bacmask_version` bumped to 2; v1 remains readable (its `mask.png` is ignored on load). [015](015-bacmask-bundle.md) rewritten; [012](superseded/012-png-label-maps.md) and [018](superseded/018-load-mask-dim-mismatch.md) marked `superseded`.
+- **Bundle v2 drops the mask.** `.bmsk` = `image.<ext>` + `meta.json` only. `biomask_version` bumped to 2; v1 remains readable (its `mask.png` is ignored on load). [015](015-biomask-bundle.md) rewritten; [012](superseded/012-png-label-maps.md) and [018](superseded/018-load-mask-dim-mismatch.md) marked `superseded`.
 - **Save / Export split in the UI.** `Save` writes only the bundle. `Export` (separate button) writes the areas CSV. No mask files touched by either action. [013](013-minimal-toolset.md) revised.
-- **Mask export deferred and UI-free.** A pure Python function (future location: `bacmask/services/mask_export.py`) will produce layered `uint16` `.npy` files via greedy packing + a `layers.json` manifest. Not wired to the UI; not MVP. Format contract recorded in [024](024-mask-export-deferred.md).
+- **Mask export deferred and UI-free.** A pure Python function (future location: `biomask/services/mask_export.py`) will produce layered `uint16` `.npy` files via greedy packing + a `layers.json` manifest. Not wired to the UI; not MVP. Format contract recorded in [024](024-mask-export-deferred.md).
 - **Click-select tiebreak on overlap** = highest `label_id` wins (newest on top). Documented in [025](025-overlapping-regions.md).
 - **Edit-mode "inside" check** now reads the target's own binary mask, not the label-map cache. [023](superseded/023-edit-mode-region-boolean-edits.md) revised.
 - **CLAUDE.md** §Core Concepts §Masks, §Save Artifacts, §Definition of Done rewritten to match.
@@ -75,7 +75,7 @@ If someone reads `CLAUDE.md` first and wonders why the real tree has extra packa
 Based on user's answers to the open-questions list, the following behavioral and scope changes were applied:
 
 - **Tool model shift.** Brush + eraser + flood fill dropped. Lasso (boundary draw + vertex editing + delete) is the single MVP primitive. Notes: [013](013-minimal-toolset.md) rewritten, [014](014-lasso-tool.md) added.
-- **Save format.** `.bacmask` ZIP bundle containing `image.<ext>`, `mask.png`, `meta.json` — sibling CSV for human-readable bookkeeping. Note: [015](015-bacmask-bundle.md) added.
+- **Save format.** `.bmsk` ZIP bundle containing `image.<ext>`, `mask.png`, `meta.json` — sibling CSV for human-readable bookkeeping. Note: [015](015-biomask-bundle.md) added.
 - **Input decoupling.** New input-abstraction layer at `ui/input/` — semantic events not raw Kivy events. Note: [016](016-input-abstraction.md) added.
 - **Calibration.** mm-per-pixel input only; uncalibrated rows have empty `area_mm2` + `scale_factor` cells. Note: [017](017-calibration-input.md) added.
 - **Load dim mismatch.** Prompt with reject-default. Note: [018](superseded/018-load-mask-dim-mismatch.md) added.

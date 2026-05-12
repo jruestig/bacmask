@@ -1,7 +1,7 @@
-# PyInstaller spec for BacMask (Windows).
+# PyInstaller spec for BioMask (Windows).
 #
-# Build:   pyinstaller packaging/bacmask.spec
-# Output:  dist/bacmask/bacmask.exe  (onefolder)
+# Build:   pyinstaller packaging/biomask.spec
+# Output:  dist/biomask/biomask.exe  (onefolder)
 #
 # This spec is authored for Windows builds. The kivy_deps.* packages only
 # install on Windows, so imports are guarded so the file is at least parseable
@@ -17,7 +17,7 @@ block_cipher = None
 SPEC_DIR = Path(SPECPATH).resolve()
 REPO_ROOT = SPEC_DIR.parent
 ENTRY = str(REPO_ROOT / "main.py")
-ICON = SPEC_DIR / "bacmask.ico"
+ICON = SPEC_DIR / "biomask.ico"
 VERSION_FILE = SPEC_DIR / "version_info.txt"
 
 # Kivy runtime hooks + SDL2/GLEW native DLLs.
@@ -37,7 +37,7 @@ try:
     hookspath += list(kivy_hookspath())
     runtime_hooks += list(kivy_runtime_hooks())
 
-    # Opt in to the Kivy subsystems BacMask actually uses; everything else
+    # Opt in to the Kivy subsystems BioMask actually uses; everything else
     # (audio, video, camera, spelling) is dropped via the matching `excludes`
     # the helper returns.
     deps = get_deps_minimal(
@@ -104,7 +104,7 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe_kwargs = dict(
-    name="bacmask",
+    name="biomask",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -138,5 +138,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="bacmask",
+    name="biomask",
 )

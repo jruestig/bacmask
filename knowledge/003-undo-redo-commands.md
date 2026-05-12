@@ -14,7 +14,7 @@ Not optional. Designed in from MVP day one.
 
 ## Design
 
-Each structural mutation is a **Command object** in `bacmask/core/commands.py`. Commands snapshot **vertex lists only** — no per-region mask fields ([030](030-polygons-are-mask-truth.md)):
+Each structural mutation is a **Command object** in `biomask/core/commands.py`. Commands snapshot **vertex lists only** — no per-region mask fields ([030](030-polygons-are-mask-truth.md)):
 
 - `LassoCloseCommand(vertices)` — adds a new region. On `apply`, assigns `next_label_id`, inserts the polygon into `state.regions`, bumps `next_label_id`. On `undo`, removes the region and restores the previous counter.
 - `BrushStrokeCommand(label_id, new_vertices)` — replaces the target region's vertex list. Stores `_old_vertices` for undo.
@@ -22,7 +22,7 @@ Each structural mutation is a **Command object** in `bacmask/core/commands.py`. 
 
 All commands implement `apply(state)` and `undo(state)`.
 
-Stack lives in `bacmask/core/history.py` → `UndoRedoStack` with `push`, `undo`, `redo`, `clear`.
+Stack lives in `biomask/core/history.py` → `UndoRedoStack` with `push`, `undo`, `redo`, `clear`.
 
 ## What a command stores
 

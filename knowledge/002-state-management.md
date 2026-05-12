@@ -13,7 +13,7 @@ related: [001, 003, 008, 014, 015, 017, 025, 026, 030]
 Single source of truth for the annotation session. No state scattered across UI widgets. Polygons are the only canonical mask representation — see [030 — Polygons Are the Only Mask Truth](030-polygons-are-mask-truth.md) for the doctrine this note operationalizes.
 
 ## Location
-`bacmask/core/state.py` → `SessionState` class.
+`biomask/core/state.py` → `SessionState` class.
 
 ## Persisted fields
 
@@ -21,7 +21,7 @@ Single source of truth for the annotation session. No state scattered across UI 
 - `image_path`: absolute path of the loaded file.
 - `image_filename`: basename with extension (written to CSV, see [011](011-csv-for-area-output.md)).
 - `regions`: `dict[int, RegionMeta]` — per-region `name` + `vertices`. **The single source of truth.** Everything mask-shaped is derived from this dict on demand ([030](030-polygons-are-mask-truth.md)).
-- `next_label_id`: int. Monotonic counter; never decremented on delete. Persisted to bundle ([015](015-bacmask-bundle.md)) so IDs remain stable across save/reload.
+- `next_label_id`: int. Monotonic counter; never decremented on delete. Persisted to bundle ([015](015-biomask-bundle.md)) so IDs remain stable across save/reload.
 - `scale_mm_per_px`: `float | None`. `None` until calibrated. See [017](017-calibration-input.md).
 
 ## Session-local fields (not persisted)
@@ -69,7 +69,7 @@ Without centralized state: state leaks into widget attributes, save detection br
 - [001 — Separation of Concerns](001-separation-of-concerns.md).
 - [003 — Undo/Redo](003-undo-redo-commands.md) — commands mutate this state; snapshots are vertex lists.
 - [014 — Lasso Tool](014-lasso-tool.md) — consumer of `active_lasso` and `regions`.
-- [015 — .bacmask Bundle](015-bacmask-bundle.md) — persistence of `next_label_id`, `regions`, scale.
+- [015 — .bmsk Bundle](015-biomask-bundle.md) — persistence of `next_label_id`, `regions`, scale.
 - [017 — Calibration Input](017-calibration-input.md) — `scale_mm_per_px`.
 - [025 — Overlapping Regions Allowed](025-overlapping-regions.md) — overlap is resolved at render time, not stored.
 - [026 — Brush Edit Model](026-brush-edit-model.md) — consumer of `active_brush_stroke`, `brush_radius_px`, `brush_default_mode`, `selected_region_id`-as-lock.

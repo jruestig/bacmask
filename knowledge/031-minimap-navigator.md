@@ -68,7 +68,7 @@ desktop-only bonus — it does not leak into the minimap's contract.
 - **Arrow-key step.** `step = clamp(min(canvas.width, canvas.height) * 0.10, 40, 120)`
   widget-px. Key-repeat (held arrow) continues to pan smoothly because each
   repeat emits a fresh `Action`. Clamping by
-  [image_canvas.PAN_KEEP_VISIBLE_FRAC](../bacmask/ui/widgets/image_canvas.py)
+  [image_canvas.PAN_KEEP_VISIBLE_FRAC](../biomask/ui/widgets/image_canvas.py)
   ensures arrows cannot push the image entirely off-screen.
 
 ## Non-goals

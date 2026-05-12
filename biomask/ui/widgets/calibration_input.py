@@ -13,7 +13,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 
-from bacmask.services.mask_service import MaskService
+from biomask.services.mask_service import MaskService
 
 # Tied to the toolbar's 40 px row height — labels and text inputs must use the
 # same DPI-aware font size, otherwise on Windows high-DPI the default 15 sp

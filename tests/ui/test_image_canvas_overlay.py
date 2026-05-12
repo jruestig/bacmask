@@ -19,9 +19,9 @@ os.environ.setdefault("KIVY_GL_BACKEND", "mock")
 
 import numpy as np  # noqa: E402
 
-from bacmask.core import masking  # noqa: E402
-from bacmask.services.mask_service import MaskService  # noqa: E402
-from bacmask.ui.widgets.image_canvas import ImageCanvas  # noqa: E402
+from biomask.core import masking  # noqa: E402
+from biomask.services.mask_service import MaskService  # noqa: E402
+from biomask.ui.widgets.image_canvas import ImageCanvas  # noqa: E402
 
 # Pinned hash captured on the pre-rewrite (mask-diff) compositor with the
 # fixture below. See the module docstring.
@@ -107,7 +107,7 @@ def test_overlay_respects_newest_on_top():
     c = _canvas_for(svc)
     c._update_overlay()
 
-    from bacmask.utils import image_utils
+    from biomask.utils import image_utils
 
     color2 = image_utils.region_color(2)
     rgba = c._overlay_rgba_buf

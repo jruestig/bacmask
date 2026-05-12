@@ -1,6 +1,6 @@
 """Kivy mouse → semantic InputEvents + keybinding registry. See knowledge/016.
 
-Window-level keyboard input is dispatched by :class:`bacmask.ui.app.BacMaskApp`
+Window-level keyboard input is dispatched by :class:`biomask.ui.app.BioMaskApp`
 calling :func:`keybinding_for` directly — Kivy delivers key events to
 ``Window``, not to widgets, so the canvas-bound :class:`DesktopInputAdapter`
 never sees them. The registry lives here so toolbar labels (027) and the
@@ -110,13 +110,13 @@ def button_label(action: str, base_text: str) -> str:
 
 
 class DesktopInputAdapter:
-    """Translate Kivy touch events into :mod:`bacmask.ui.input.events`.
+    """Translate Kivy touch events into :mod:`biomask.ui.input.events`.
 
     The ``emit`` callback receives one :class:`InputEvent` per semantic event.
     Mouse scroll becomes :class:`Zoom`; middle-mouse drag becomes :class:`Pan`;
     left-button press/move/release becomes a :class:`PointerDown` / :class:`PointerMove`
     / :class:`PointerUp` sequence. Keyboard input is handled at the window
-    level by :class:`bacmask.ui.app.BacMaskApp` via :func:`keybinding_for` —
+    level by :class:`biomask.ui.app.BioMaskApp` via :func:`keybinding_for` —
     Kivy delivers key events to ``Window``, not to widgets, so this adapter
     never sees them.
     """

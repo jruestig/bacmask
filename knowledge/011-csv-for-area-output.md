@@ -10,7 +10,7 @@ related: [000, 005, 012, 014, 015, 017, 030, 035]
 
 # CSV for Area Output
 
-Per-region areas exported as CSV, one file per image. Sibling to the `.bacmask` bundle ([015](015-bacmask-bundle.md)) — serves as human-readable double-bookkeeping.
+Per-region areas exported as CSV, one file per image. Sibling to the `.bmsk` bundle ([015](015-biomask-bundle.md)) — serves as human-readable double-bookkeeping.
 
 ## Schema (locked)
 Column order is load-bearing. Header row always written.
@@ -49,7 +49,7 @@ Pre-[030](030-polygons-are-mask-truth.md) builds wrote `area_px` as `mask.sum()`
 - **No ceremony.** Per-region tabular area data has no nesting. JSON or SQLite would add overhead for no gain.
 
 ## Why CSV lives outside the bundle
-- Bundle ([015](015-bacmask-bundle.md)) is the source of truth; CSV is derived and regenerable.
+- Bundle ([015](015-biomask-bundle.md)) is the source of truth; CSV is derived and regenerable.
 - Keeping the CSV as a standalone sibling file preserves its direct-read value — no unzipping needed.
 
 ## When we'd revisit
@@ -62,7 +62,7 @@ Multi-image aggregation becoming a first-class feature → long-form CSV across 
 Why: Android SAF write hand a writable `BinaryIO` (file descriptor wrapper). No need for temp-file dance. See [035](035-io-source-carriers.md).
 
 ## Related
-- [015 — .bacmask Bundle](015-bacmask-bundle.md).
+- [015 — .bmsk Bundle](015-biomask-bundle.md).
 - [014 — Lasso Tool](014-lasso-tool.md) — ID assignment rules.
 - [017 — Calibration Input](017-calibration-input.md) — uncalibrated semantics.
 - [005 — Testing Strategy](005-testing-strategy.md) — CSV contract tests.

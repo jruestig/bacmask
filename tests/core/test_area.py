@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from bacmask.core import area
+from biomask.core import area
 
 
 def test_count_pixels_filled_square_100x100():

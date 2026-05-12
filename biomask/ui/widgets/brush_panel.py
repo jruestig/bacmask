@@ -19,8 +19,8 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 from kivy.uix.togglebutton import ToggleButton
 
-from bacmask.config import defaults
-from bacmask.services.mask_service import MaskService
+from biomask.config import defaults
+from biomask.services.mask_service import MaskService
 
 PANEL_HEIGHT = 40
 
@@ -70,7 +70,7 @@ class BrushPanel(BoxLayout):
         ):
             btn = ToggleButton(
                 text=label,
-                group="bacmask_brush_mode",
+                group="biomask_brush_mode",
                 allow_no_selection=False,
                 state="down" if cur_mode == mode else "normal",
                 size_hint_x=None,

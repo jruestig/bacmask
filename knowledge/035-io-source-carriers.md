@@ -13,7 +13,7 @@ Decouple decode logic from byte acquisition. Same code path serve desktop filesy
 
 ## Decision
 
-Two layer in `bacmask/core/io_manager.py`:
+Two layer in `biomask/core/io_manager.py`:
 
 1. **Source carriers** — frozen dataclass hold encoded bytes + metadata.
    - `ImageSource(data, ext, name, origin)`
@@ -90,7 +90,7 @@ Total `pytest`: 215 → 225, all pass.
 
 ## What stay Path
 
-- `BACMASK_OUTPUT_ROOT` in `config/defaults.py` — not relevant to load.
+- `BIOMASK_OUTPUT_ROOT` in `config/defaults.py` — not relevant to load.
 - `io_manager.save_bundle(bundle_path, source_image_path, …)` legacy convenience — unused by service after refactor; kept for back-compat with `tests/core/test_io_manager.py` round-trip helpers.
 
 ## Why not protocol / ABC
@@ -105,5 +105,5 @@ Considered single `load_image(source: Path | bytes | BinaryIO)`. Rejected — ca
 
 - [008 — Directory Layout](008-directory-layout.md) — `io_manager.py` shape.
 - [011 — CSV for Area Output](011-csv-for-area-output.md) — `save_areas_csv` accept stream.
-- [015 — .bacmask Bundle](015-bacmask-bundle.md) — `BundleContents.image_bytes`, `save_bundle_from_bytes` accept stream.
+- [015 — .bmsk Bundle](015-biomask-bundle.md) — `BundleContents.image_bytes`, `save_bundle_from_bytes` accept stream.
 - [020 — Platform Scope](020-platform-scope.md) — Android-readiness hook now load-bearing.

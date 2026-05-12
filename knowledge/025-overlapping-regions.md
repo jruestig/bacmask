@@ -48,7 +48,7 @@ A press-down's "is this pixel in region R?" test is polygon-based: `cv2.pointPol
 
 ### Bundle round-trip
 
-`.bacmask` stores polygons, nothing else mask-related ([015](015-bacmask-bundle.md)). Overlap is preserved losslessly because the polygon list preserves every region independently. No mask reconciliation on load.
+`.bmsk` stores polygons, nothing else mask-related ([015](015-biomask-bundle.md)). Overlap is preserved losslessly because the polygon list preserves every region independently. No mask reconciliation on load.
 
 ### Mask export
 
@@ -70,7 +70,7 @@ Raster export is a separate, headless operation ([024](024-mask-export-deferred.
 
 - [002 — State Management](002-state-management.md) — storage implications.
 - [014 — Lasso Tool](014-lasso-tool.md) — primitive that creates overlapping polygons.
-- [015 — .bacmask Bundle Format](015-bacmask-bundle.md) — polygon-only bundle.
+- [015 — .bmsk Bundle Format](015-biomask-bundle.md) — polygon-only bundle.
 - [021 — Edit Collision Policy (Clip)](superseded/021-vertex-edit-collision.md) — **superseded** by this note.
 - [023 — Edit Mode & Region Boolean Edits](superseded/023-edit-mode-region-boolean-edits.md) — add/subtract stroke; no longer clips.
 - [024 — Mask Export (deferred)](024-mask-export-deferred.md) — where overlap is resolved into layered disjoint masks.

@@ -18,16 +18,16 @@ from typing import Any
 import cv2
 import numpy as np
 
-from bacmask.config import defaults
-from bacmask.core import area, calibration, io_manager, masking
-from bacmask.core.commands import (
+from biomask.config import defaults
+from biomask.core import area, calibration, io_manager, masking
+from biomask.core.commands import (
     BrushStrokeCommand,
     DeleteRegionCommand,
     LassoCloseCommand,
 )
-from bacmask.core.history import UndoRedoStack
-from bacmask.core.io_manager import BundleSource, ImageSource
-from bacmask.core.state import BrushStroke, SessionState, Tool
+from biomask.core.history import UndoRedoStack
+from biomask.core.io_manager import BundleSource, ImageSource
+from biomask.core.state import BrushStroke, SessionState, Tool
 
 log = logging.getLogger(__name__)
 
@@ -167,7 +167,7 @@ class MaskService:
         self._notify()
 
     def load_bundle(self, path: Path | str) -> None:
-        """Convenience: load a ``.bacmask`` bundle from a filesystem path."""
+        """Convenience: load a ``.bmsk`` bundle from a filesystem path."""
         self.load_bundle_source(BundleSource.from_path(path))
 
     # ---- tool selection -----------------------------------------------------
@@ -773,7 +773,7 @@ class MaskService:
     # ---- save / export ------------------------------------------------------
 
     def save_bundle(self, bundle_path: Path | str) -> None:
-        """Write the ``.bacmask`` bundle only. No CSV; no mask sidecar."""
+        """Write the ``.bmsk`` bundle only. No CSV; no mask sidecar."""
         if (
             self.state.image is None
             or self.state.image_bytes is None

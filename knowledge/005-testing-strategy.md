@@ -32,11 +32,11 @@ The separation-of-concerns split earns its keep here.
 - Save label map → load label map → `np.array_equal` with original. Bit-identical.
 - 16-bit PNG dtype preserved (not silently downcast to uint8).
 
-### Bundle round-trip ([015](015-bacmask-bundle.md))
-- Save `.bacmask` → load → `image`, `mask`, `meta` all restore identically.
+### Bundle round-trip ([015](015-biomask-bundle.md))
+- Save `.bmsk` → load → `image`, `mask`, `meta` all restore identically.
 - `next_label_id`, `regions` (names + vertices) preserved.
 - Deleted region's ID stays reserved — new lasso after reload does not re-use it.
-- Unknown `bacmask_version` → raise, do not silently proceed.
+- Unknown `biomask_version` → raise, do not silently proceed.
 
 ### CSV output
 - Column order exactly: `filename, region_id, region_name, area_px, area_mm2, scale_factor`.
@@ -69,7 +69,7 @@ The separation-of-concerns split earns its keep here.
 ## Related
 - [001 — Separation of Concerns](001-separation-of-concerns.md) — the precondition for this strategy.
 - [014 — Lasso Tool](014-lasso-tool.md).
-- [015 — .bacmask Bundle](015-bacmask-bundle.md).
+- [015 — .bmsk Bundle](015-biomask-bundle.md).
 - [017 — Calibration Input](017-calibration-input.md).
 - [018 — Load Mask Dimension Mismatch](superseded/018-load-mask-dim-mismatch.md).
 - [019 — Dev Tooling](019-dev-tooling.md).

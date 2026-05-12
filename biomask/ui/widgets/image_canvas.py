@@ -26,10 +26,10 @@ from kivy.graphics import (
 from kivy.graphics.texture import Texture
 from kivy.uix.widget import Widget
 
-from bacmask.core import masking
-from bacmask.services.mask_service import MaskService
-from bacmask.ui.input.desktop_adapter import DesktopInputAdapter
-from bacmask.ui.input.events import (
+from biomask.core import masking
+from biomask.services.mask_service import MaskService
+from biomask.ui.input.desktop_adapter import DesktopInputAdapter
+from biomask.ui.input.events import (
     Action,
     InputEvent,
     Pan,
@@ -38,7 +38,7 @@ from bacmask.ui.input.events import (
     PointerUp,
     Zoom,
 )
-from bacmask.utils import image_utils
+from biomask.utils import image_utils
 
 OVERLAY_ALPHA = 0.45
 SELECTED_OUTLINE_COLOR = (0.0, 1.0, 1.0, 1.0)  # cyan

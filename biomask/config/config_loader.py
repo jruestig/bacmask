@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from bacmask.config import defaults
+from biomask.config import defaults
 
 
 def load_config() -> dict[str, Any]:
