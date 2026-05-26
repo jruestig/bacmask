@@ -36,7 +36,7 @@ The Save As dialog auto-focuses its filename `TextInput` on open so caret-edit k
 
 ## Why not a fixed `BUNDLES_DIR` / `AREAS_DIR`
 
-The first cut wrote to `defaults.BUNDLES_DIR` / `defaults.AREAS_DIR` and silently created those directories. That was wrong for this tool: bacteria-colony datasets are organised per-experiment by the user, and burying outputs under a global `output/` tree forces them to move files afterward. The defaults still exist as constants ([006](006-configuration-management.md)) but are no longer eagerly created and are no longer the Save As starting point.
+The first cut wrote to `defaults.BUNDLES_DIR` / `defaults.AREAS_DIR` and silently created those directories. That was wrong for this tool: biological imaging datasets are organised per-experiment by the user, and burying outputs under a global `output/` tree forces them to move files afterward. The defaults still exist as constants ([006](006-configuration-management.md)) but are no longer eagerly created and are no longer the Save As starting point.
 
 `BIOMASK_OUTPUT_ROOT` env override remains available for users who *want* a fixed root.
 

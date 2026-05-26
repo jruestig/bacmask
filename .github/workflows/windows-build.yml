@@ -3,6 +3,7 @@ name: windows-build
 on:
   workflow_dispatch:
   push:
+    branches: [master]
     tags:
       - "v*"
 
@@ -32,7 +33,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build
-          key: pyinstaller-${{ runner.os }}-${{ hashFiles('packaging/bacmask.spec', 'uv.lock', 'pyproject.toml') }}
+          key: pyinstaller-${{ runner.os }}-${{ hashFiles('packaging/biomask.spec', 'uv.lock', 'pyproject.toml') }}
           restore-keys: |
             pyinstaller-${{ runner.os }}-
 
@@ -41,7 +42,7 @@ jobs:
           KIVY_GL_BACKEND: mock
           KIVY_NO_CONSOLELOG: "1"
           KIVY_NO_ARGS: "1"
-        run: uv run pyinstaller packaging\bacmask.spec --noconfirm
+        run: uv run pyinstaller packaging\biomask.spec --noconfirm
 
       - name: Install Inno Setup 6
         run: choco install innosetup --no-progress -y
@@ -59,14 +60,14 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bacmask-setup-${{ steps.version.outputs.version }}
-          path: dist/bacmask-setup-${{ steps.version.outputs.version }}.exe
+          name: biomask-setup-${{ steps.version.outputs.version }}
+          path: dist/biomask-setup-${{ steps.version.outputs.version }}.exe
           if-no-files-found: error
 
       - name: Attach to GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/bacmask-setup-${{ steps.version.outputs.version }}.exe
+          files: dist/biomask-setup-${{ steps.version.outputs.version }}.exe
           fail_on_unmatched_files: true
 

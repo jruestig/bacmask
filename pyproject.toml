@@ -1,7 +1,7 @@
 [project]
 name = "biomask"
 version = "0.1.0"
-description = "Bacteria colony masking and area measurement tool."
+description = "Biological image masking and area measurement tool."
 readme = "CLAUDE.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [

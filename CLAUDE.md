@@ -1,4 +1,4 @@
-# CLAUDE.md — BioMask: Bacteria Colony Masking & Area Measurement Tool
+# CLAUDE.md — BioMask: Biological Image Masking & Area Measurement Tool
 
 > **Deeper rationale and design notes live in [`knowledge/`](knowledge/README.md)** (Zettelkasten).
 > CLAUDE.md holds scope, rules, and contracts. The knowledge base holds the **why**.
@@ -6,12 +6,12 @@
 
 ## Project Overview
 BioMask is a cross-platform image analysis tool inspired by ImageJ, **focused exclusively**
-on masking bacteria colonies in microscope/camera images and computing their areas in mm².
+on masking regions in biological images (microscope, camera) and computing their areas in mm².
 This is NOT a general-purpose image editor. There are no filters, color adjustments, or
 unrelated tools.
 
 The primary workflow is:
-1. Load an image of bacteria colonies from disk.
+1. Load a biological image from disk.
 2. Provide a scale factor (mm per pixel) for calibration.
 3. Trace region boundaries around colonies with the lasso tool.
 4. View computed areas (px and mm²) for all labeled regions.
